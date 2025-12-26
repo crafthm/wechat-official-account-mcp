@@ -294,6 +294,34 @@ npm run check
 npm run lint
 ```
 
+### 启动 Web 界面
+
+项目提供了 Web 管理界面，可以通过以下方式启动：
+
+**方式一：同时启动前端和后端（推荐）**
+
+```bash
+npm run dev:all
+```
+
+这将同时启动：
+- 后端 API 服务器（运行在 `http://localhost:3001`）
+- 前端开发服务器（运行在 `http://localhost:5173`，Vite 默认端口）
+
+**方式二：分别启动**
+
+```bash
+# 终端 1：启动后端 API 服务器
+npm run dev:api
+
+# 终端 2：启动前端开发服务器
+npm run dev:web
+```
+
+启动后，在浏览器中访问 `http://localhost:5173` 即可使用 Web 界面。
+
+> 注意：前端开发服务器会自动代理 `/api` 请求到后端服务器（`http://localhost:3001`）。
+
 ### 构建和发布
 
 ```bash
