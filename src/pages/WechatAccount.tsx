@@ -71,7 +71,11 @@ export default function WechatAccount() {
           <nav className="space-y-1 px-2">
             {/* 新文章 */}
             <button
-              onClick={() => setCurrentMenu("new-article")}
+              onClick={() => {
+                setDraftData(null);
+                setShouldClearEditor(true);
+                setCurrentMenu("new-article");
+              }}
               className={`w-full flex items-center px-4 py-3 rounded-lg transition-colors text-left ${
                 currentMenu === "new-article"
                   ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400"

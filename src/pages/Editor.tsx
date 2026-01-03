@@ -299,11 +299,12 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     if (shouldClear) {
       setEditorContent(DEFAULT_MARKDOWN_CONTENT);
       setCssContent(DEFAULT_CSS_CONTENT);
+      setOutput(''); // 清空预览区域
       if (onClearComplete) {
         onClearComplete();
       }
     }
-  }, [shouldClear, onClearComplete, setEditorContent, setCssContent]);
+  }, [shouldClear, onClearComplete, setEditorContent, setCssContent, setOutput]);
 
   // 确保有默认内容（在初始化后）
   useEffect(() => {
