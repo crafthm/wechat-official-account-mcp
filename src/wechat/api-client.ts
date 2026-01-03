@@ -123,10 +123,24 @@ export class WechatApiClient {
     showCoverPic?: number;
     needOpenComment?: number;
     onlyFansCanComment?: number;
+    isOriginal?: number;
+    originalSourceUrl?: string;
   }>): Promise<{ mediaId: string }> {
     try {
       const response = await this.httpClient.post('/cgi-bin/material/add_news', {
-        articles,
+        articles: articles.map(article => ({
+          title: article.title,
+          author: article.author || '',
+          digest: article.digest || '',
+          content: article.content,
+          content_source_url: article.contentSourceUrl || '',
+          thumb_media_id: article.thumbMediaId,
+          show_cover_pic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+          need_open_comment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+          only_fans_can_comment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+          is_original: article.isOriginal !== undefined ? article.isOriginal : 0,
+          original_source_url: article.originalSourceUrl || '',
+        })),
       });
 
       if (response.data.errcode) {
@@ -155,10 +169,24 @@ export class WechatApiClient {
     showCoverPic?: number;
     needOpenComment?: number;
     onlyFansCanComment?: number;
+    isOriginal?: number;
+    originalSourceUrl?: string;
   }>): Promise<{ mediaId: string }> {
     try {
       const response = await this.httpClient.post('/cgi-bin/draft/add', {
-        articles,
+        articles: articles.map(article => ({
+          title: article.title,
+          author: article.author || '',
+          digest: article.digest || '',
+          content: article.content,
+          content_source_url: article.contentSourceUrl || '',
+          thumb_media_id: article.thumbMediaId,
+          show_cover_pic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+          need_open_comment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+          only_fans_can_comment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+          is_original: article.isOriginal !== undefined ? article.isOriginal : 0,
+          original_source_url: article.originalSourceUrl || '',
+        })),
       });
 
       if (response.data.errcode) {

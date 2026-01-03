@@ -123,6 +123,8 @@ export interface DraftInfo {
       showCoverPic?: number;
       needOpenComment?: number;
       onlyFansCanComment?: number;
+      isOriginal?: number;
+      originalSourceUrl?: string;
     }>;
   };
   updateTime: number;

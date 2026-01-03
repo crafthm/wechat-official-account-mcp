@@ -373,7 +373,12 @@ DB_PATH=./data/wechat-mcp.db
 1. 登录微信公众平台
 2. 进入「开发」->「基本配置」
 3. 获取 AppID 和 AppSecret
-4. 使用 `wechat_auth` 工具进行配置
+4. **配置 IP 白名单**（重要！）
+   - 在「基本配置」页面找到「IP白名单」设置
+   - 添加服务器实际使用的 IP 地址
+   - 如果遇到 `invalid ip, not in whitelist` 错误，错误信息中会显示需要添加的 IP
+   - 添加后等待几分钟生效
+5. 使用 `wechat_auth` 工具进行配置
 
 ## 🔒 安全说明
 

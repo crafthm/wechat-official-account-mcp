@@ -87,7 +87,25 @@ export class AuthManager {
       });
 
       if (response.data.errcode) {
-        throw new Error(`Failed to get access token: ${response.data.errmsg} (${response.data.errcode})`);
+        const errorMsg = response.data.errmsg || 'Unknown error';
+        const errorCode = response.data.errcode;
+        
+        // 处理 IP 白名单错误
+        if (errorMsg.includes('not in whitelist') || errorMsg.includes('invalid ip')) {
+          const ipMatch = errorMsg.match(/invalid ip\s+(\d+\.\d+\.\d+\.\d+)/i);
+          const extractedIp = ipMatch ? ipMatch[1] : '未知';
+          throw new Error(
+            `IP 白名单限制：服务器 IP ${extractedIp} 未在微信公众号后台的 IP 白名单中。\n\n` +
+            `解决方法：\n` +
+            `1. 登录微信公众平台 (https://mp.weixin.qq.com)\n` +
+            `2. 进入"开发" -> "基本配置" -> "IP白名单"\n` +
+            `3. 添加服务器 IP: ${extractedIp}\n` +
+            `4. 保存后等待几分钟生效\n\n` +
+            `错误详情: ${errorMsg} (${errorCode})`
+          );
+        }
+        
+        throw new Error(`Failed to get access token: ${errorMsg} (${errorCode})`);
       }
 
       const { access_token, expires_in } = response.data;

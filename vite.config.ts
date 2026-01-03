@@ -24,6 +24,26 @@ export default defineConfig({
     }), 
     tsconfigPaths(),
   ],
+  resolve: {
+    alias: {
+      // 排除 Node.js 专用模块，避免在浏览器中打包
+      'minio': 'data:text/javascript,export default {}',
+      'ali-oss': 'data:text/javascript,export default {}',
+      'buffer-from': 'data:text/javascript,export default {}',
+    },
+  },
+  optimizeDeps: {
+    exclude: ['minio', 'ali-oss', 'buffer-from'],
+  },
+  build: {
+    rollupOptions: {
+      external: ['minio', 'ali-oss', 'buffer-from'],
+    },
+  },
+  define: {
+    'process.env': '{}',
+    'global': 'globalThis',
+  },
   server: {
     proxy: {
       '/api': {

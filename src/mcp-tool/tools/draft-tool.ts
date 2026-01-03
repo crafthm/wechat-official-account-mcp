@@ -16,6 +16,8 @@ const draftToolSchema = z.object({
     showCoverPic: z.number().optional(),
     needOpenComment: z.number().optional(),
     onlyFansCanComment: z.number().optional(),
+    isOriginal: z.number().optional(),
+    originalSourceUrl: z.string().optional(),
   })).optional(),
   offset: z.number().optional(),
   count: z.number().optional(),
@@ -48,9 +50,11 @@ async function handleDraftTool(context: WechatToolContext): Promise<WechatToolRe
               content: article.content,
               content_source_url: article.contentSourceUrl || '',
               thumb_media_id: article.thumbMediaId,
-              show_cover_pic: article.showCoverPic || 0,
-              need_open_comment: article.needOpenComment || 0,
-              only_fans_can_comment: article.onlyFansCanComment || 0,
+              show_cover_pic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+              need_open_comment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+              only_fans_can_comment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+              is_original: article.isOriginal !== undefined ? article.isOriginal : 0,
+              original_source_url: article.originalSourceUrl || '',
             }))
           }) as any;
           
@@ -85,7 +89,8 @@ async function handleDraftTool(context: WechatToolContext): Promise<WechatToolRe
             `内容: ${item.content.substring(0, 100)}${item.content.length > 100 ? '...' : ''}\n` +
             `原文链接: ${item.content_source_url || '无'}\n` +
             `封面图ID: ${item.thumb_media_id}\n` +
-            `显示封面: ${item.show_cover_pic ? '是' : '否'}\n`
+            `显示封面: ${item.show_cover_pic ? '是' : '否'}\n` +
+            `声明原创: ${item.is_original ? '是' : '否'}${item.original_source_url ? ` (原文链接: ${item.original_source_url})` : ''}\n`
           ).join('\n');
           
           return {
@@ -205,9 +210,11 @@ async function handleDraftMcpTool(args: unknown, apiClient: WechatApiClient): Pr
               content: article.content,
               content_source_url: article.contentSourceUrl || '',
               thumb_media_id: article.thumbMediaId,
-              show_cover_pic: article.showCoverPic || 0,
-              need_open_comment: article.needOpenComment || 0,
-              only_fans_can_comment: article.onlyFansCanComment || 0,
+              show_cover_pic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+              need_open_comment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+              only_fans_can_comment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+              is_original: article.isOriginal !== undefined ? article.isOriginal : 0,
+              original_source_url: article.originalSourceUrl || '',
             }))
           }) as any;
           
@@ -240,7 +247,8 @@ async function handleDraftMcpTool(args: unknown, apiClient: WechatApiClient): Pr
             `内容: ${item.content.substring(0, 100)}${item.content.length > 100 ? '...' : ''}\n` +
             `原文链接: ${item.content_source_url || '无'}\n` +
             `封面图ID: ${item.thumb_media_id}\n` +
-            `显示封面: ${item.show_cover_pic ? '是' : '否'}\n`
+            `显示封面: ${item.show_cover_pic ? '是' : '否'}\n` +
+            `声明原创: ${item.is_original ? '是' : '否'}${item.original_source_url ? ` (原文链接: ${item.original_source_url})` : ''}\n`
           ).join('\n');
           
           return {
@@ -377,6 +385,8 @@ export const draftMcpTool: McpTool = {
       showCoverPic: z.number().optional().describe('是否显示封面图片'),
       needOpenComment: z.number().optional().describe('是否开启评论'),
       onlyFansCanComment: z.number().optional().describe('是否仅粉丝可评论'),
+      isOriginal: z.number().optional().describe('是否声明原创（0/1，需要公众号已开通原创声明功能）'),
+      originalSourceUrl: z.string().optional().describe('原文链接（声明原创时可能需要）'),
     })).optional().describe('文章列表（创建时必需）'),
     offset: z.number().optional().describe('偏移量（列表时使用）'),
     count: z.number().optional().describe('数量（列表时使用）'),

@@ -127,6 +127,25 @@ export class StorageManager {
         publish_status INTEGER NOT NULL
       )
     `);
+
+    // 图床配置表
+    await run(`
+      CREATE TABLE IF NOT EXISTS image_host_configs (
+        host_type TEXT PRIMARY KEY,
+        config_data TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+
+    // 当前使用的图床类型
+    await run(`
+      CREATE TABLE IF NOT EXISTS image_host_settings (
+        id INTEGER PRIMARY KEY,
+        current_host TEXT NOT NULL DEFAULT 'wechat',
+        updated_at INTEGER NOT NULL
+      )
+    `);
   }
 
   private encryptValue(value: string | null | undefined): string | null {
@@ -315,6 +334,112 @@ export class StorageManager {
       createdAt: row.created_at,
       url: row.url,
     }));
+  }
+
+  /**
+   * 保存图床配置
+   */
+  async saveImageHostConfig(hostType: string, config: Record<string, any>): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const run = promisify(this.db.run.bind(this.db));
+    const now = Date.now();
+    const configData = JSON.stringify(config);
+
+    await run(
+      `INSERT OR REPLACE INTO image_host_configs (host_type, config_data, created_at, updated_at) 
+       VALUES (?, ?, COALESCE((SELECT created_at FROM image_host_configs WHERE host_type = ?), ?), ?)`,
+      [hostType, this.encryptValue(configData), hostType, now, now]
+    );
+  }
+
+  /**
+   * 获取图床配置
+   */
+  async getImageHostConfig(hostType: string): Promise<Record<string, any> | null> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const get = promisify(this.db.get.bind(this.db));
+    const row = await get('SELECT * FROM image_host_configs WHERE host_type = ?', [hostType]) as {
+      config_data: string;
+    } | undefined;
+
+    if (!row) return null;
+
+    try {
+      const decrypted = this.decryptValue(row.config_data) || row.config_data;
+      return JSON.parse(decrypted);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 删除图床配置
+   */
+  async deleteImageHostConfig(hostType: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const run = promisify(this.db.run.bind(this.db));
+    await run('DELETE FROM image_host_configs WHERE host_type = ?', [hostType]);
+  }
+
+  /**
+   * 列出所有图床配置
+   */
+  async listImageHostConfigs(): Promise<Array<{ hostType: string; config: Record<string, any> }>> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const all = promisify(this.db.all.bind(this.db));
+    const rows = await all('SELECT * FROM image_host_configs') as Array<{
+      host_type: string;
+      config_data: string;
+    }>;
+
+    return rows.map(row => {
+      try {
+        const decrypted = this.decryptValue(row.config_data) || row.config_data;
+        return {
+          hostType: row.host_type,
+          config: JSON.parse(decrypted),
+        };
+      } catch {
+        return {
+          hostType: row.host_type,
+          config: {},
+        };
+      }
+    });
+  }
+
+  /**
+   * 设置当前使用的图床
+   */
+  async setCurrentImageHost(hostType: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const run = promisify(this.db.run.bind(this.db));
+    const now = Date.now();
+
+    await run(
+      `INSERT OR REPLACE INTO image_host_settings (id, current_host, updated_at) 
+       VALUES (1, ?, ?)`,
+      [hostType, now]
+    );
+  }
+
+  /**
+   * 获取当前使用的图床
+   */
+  async getCurrentImageHost(): Promise<string> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const get = promisify(this.db.get.bind(this.db));
+    const row = await get('SELECT * FROM image_host_settings WHERE id = 1') as {
+      current_host: string;
+    } | undefined;
+
+    return row?.current_host || 'wechat';
   }
 
   /**

@@ -10,6 +10,9 @@ import express, {
 import cors from 'cors'
 import dotenv from 'dotenv'
 import authRoutes from './routes/auth.js'
+import publishRoutes from './routes/publish.js'
+import wechatRoutes from './routes/wechat.js'
+import draftRoutes from './routes/draft.js'
 
 // load env
 dotenv.config()
@@ -24,6 +27,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }))
  * API Routes
  */
 app.use('/api/auth', authRoutes)
+app.use('/api/publish', publishRoutes)
+app.use('/api/wechat', wechatRoutes)
+app.use('/api/draft', draftRoutes)
 
 /**
  * health
