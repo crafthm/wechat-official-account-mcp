@@ -55,9 +55,9 @@ export interface EditorStore {
 export const useEditorStore = create<EditorStore>()(
   persist(
     (set, get) => ({
-      // 初始状态
-      editorContent: DEFAULT_MARKDOWN_CONTENT,
-      cssContent: DEFAULT_CSS_CONTENT,
+      // 初始状态（使用空字符串，避免显示示例文章）
+      editorContent: '',
+      cssContent: '',
       output: '',
       currentFont: config.builtinFonts[0].value,
       currentSize: config.sizeOption[2].value,
@@ -170,8 +170,10 @@ export const useEditorStore = create<EditorStore>()(
           isMacCodeBlock: savedIsMacCodeBlock !== 'false',
           isEditOnLeft: savedIsEditOnLeft !== 'false',
           previewMode: (savedPreviewMode === 'mobile' || savedPreviewMode === 'pc') ? savedPreviewMode : 'pc',
-          editorContent: savedEditorContent || DEFAULT_MARKDOWN_CONTENT,
-          cssContent: savedCssContent || DEFAULT_CSS_CONTENT,
+          // 如果 localStorage 中有内容，使用保存的内容；如果没有（null），使用空字符串而不是默认内容
+          // 这样清空操作后就不会显示示例文章
+          editorContent: savedEditorContent !== null ? savedEditorContent : '',
+          cssContent: savedCssContent !== null ? savedCssContent : '',
         });
       },
     }),

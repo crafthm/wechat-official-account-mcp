@@ -55,6 +55,7 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
   const [showSaveDraftDialog, setShowSaveDraftDialog] = useState(false);
   const [isImportedFromLocal, setIsImportedFromLocal] = useState(false);
   const [fileHandle, setFileHandle] = useState<FileSystemFileHandle | null>(null);
+  const [fileName, setFileName] = useState<string>('');
   const [lastContentHash, setLastContentHash] = useState<string>('');
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
@@ -66,10 +67,16 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
 
   const editorRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const hasInitialized = useRef(false);
 
-  // 初始化编辑器状态（只在组件挂载时执行一次）
+  // 初始化编辑器状态（只在组件挂载时执行一次，且不在清空时）
   useEffect(() => {
-    initEditorState();
+    // 如果 shouldClear 为 true，说明需要清空，不执行初始化
+    // 或者如果已经初始化过，也不执行
+    if (!shouldClear && !hasInitialized.current) {
+      initEditorState();
+      hasInitialized.current = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -143,6 +150,7 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     if (shouldClear) {
       setIsImportedFromLocal(false);
       setFileHandle(null);
+      setFileName('');
       setAutoRefreshEnabled(false);
       setLastContentHash('');
       if (refreshInterval) {
@@ -294,27 +302,48 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     }
   }, [draftData, setEditorContent]);
 
-  // 处理清空内容
+  // 处理清空内容（优先级最高，在其他 useEffect 之前执行）
   useEffect(() => {
     if (shouldClear) {
-      setEditorContent(DEFAULT_MARKDOWN_CONTENT);
-      setCssContent(DEFAULT_CSS_CONTENT);
-      setOutput(''); // 清空预览区域
+      // 先清除 localStorage，防止 initEditorState 加载内容
+      localStorage.removeItem('__editor_content');
+      localStorage.removeItem('__css_content');
+      // 清空文章内容（强制设置为空字符串）
+      setEditorContent('');
+      // 清空CSS内容（强制设置为空字符串）
+      setCssContent('');
+      // 清空预览区域
+      setOutput('');
+      // 标记为已初始化，防止 initEditorState 再次执行
+      hasInitialized.current = true;
       if (onClearComplete) {
         onClearComplete();
       }
     }
   }, [shouldClear, onClearComplete, setEditorContent, setCssContent, setOutput]);
 
-  // 确保有默认内容（在初始化后）
+  // 确保有默认内容（在初始化后，但不在清空时）
+  // 这个 useEffect 已经被禁用，因为清空操作应该保持内容为空
+  // 只有在首次加载且不是清空操作时才设置默认内容
   useEffect(() => {
-    if (!editorContent || editorContent.trim() === '') {
-      setEditorContent(DEFAULT_MARKDOWN_CONTENT);
+    // 如果 shouldClear 为 true，不设置默认内容
+    if (shouldClear) {
+      return;
     }
-    if (!cssContent || cssContent.trim() === '') {
-      setCssContent(DEFAULT_CSS_CONTENT);
+    
+    // 检查 localStorage，如果被清空（null），说明是清空操作，保持为空
+    const savedContent = localStorage.getItem('__editor_content');
+    const savedCss = localStorage.getItem('__css_content');
+    
+    // 如果 localStorage 被明确清空（removeItem），保持为空，不设置默认内容
+    if (savedContent === null || savedCss === null) {
+      return;
     }
-  }, [editorContent, cssContent, setEditorContent, setCssContent]);
+    
+    // 只有在 localStorage 中有内容且当前内容为空时，才使用保存的内容
+    // 注意：这里不应该设置默认内容，因为 initEditorState 已经处理了
+    // 如果 initEditorState 没有执行（shouldClear 为 true），这里也不应该设置默认内容
+  }, [editorContent, cssContent, shouldClear]);
 
   // 初始化渲染器（在状态加载后）
   useEffect(() => {
@@ -389,6 +418,8 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
         setEditorContent(content);
         setIsImportedFromLocal(true);
         setFileHandle(handle);
+        // 保存文件名（FileSystemFileHandle 有 name 属性）
+        setFileName(file.name);
         
         // 计算初始内容哈希（使用支持 Unicode 的哈希方法）
         const contentHash = calculateHash(content);
@@ -420,6 +451,7 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
         setEditorContent(content);
         setIsImportedFromLocal(true);
         setFileHandle(null); // 传统方式无法获取文件句柄
+        setFileName(file.name); // 保存文件名
         setAutoRefreshEnabled(false); // 传统方式无法自动刷新
       }
     };
@@ -585,12 +617,22 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
           }`}
           onContextMenu={handleRightClick}
         >
-          <CodeMirrorEditor
-            value={editorContent || DEFAULT_MARKDOWN_CONTENT}
-            onChange={setEditorContent}
-            nightMode={nightMode}
-            onPaste={handlePasteImage}
-          />
+          <div className="flex-1 overflow-hidden">
+            <CodeMirrorEditor
+              value={editorContent}
+              onChange={setEditorContent}
+              nightMode={nightMode}
+              onPaste={handlePasteImage}
+            />
+          </div>
+          {/* 状态栏 */}
+          {isImportedFromLocal && fileName && (
+            <div className="h-6 border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 px-3 flex items-center text-xs text-gray-600 dark:text-gray-400">
+              <span className="truncate" title={fileName}>
+                本地文件: {fileName}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* 预览 */}
@@ -601,7 +643,7 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
           }`}
         >
           <Preview
-            content={editorContent || DEFAULT_MARKDOWN_CONTENT}
+            content={editorContent}
             cssContent={cssContent || ''}
             className={nightMode ? 'dark:bg-white' : ''}
           />
