@@ -51,8 +51,8 @@ router.post('/upload-thumb', async (req: Request, res: Response) => {
     // 将 base64 转换为 Buffer
     const buffer = Buffer.from(fileData, 'base64');
     
-    // 上传到永久素材库
-    const result = await client!.uploadMedia({
+    // 上传到永久素材库（草稿需要永久素材的media_id）
+    const result = await client!.uploadPermanentMedia({
       type: 'image',
       media: buffer,
       fileName,

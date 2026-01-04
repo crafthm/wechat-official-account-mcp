@@ -226,6 +226,52 @@ export class WechatApiClient {
   }
 
   /**
+   * 上传永久素材
+   */
+  async uploadPermanentMedia(params: {
+    type: 'image' | 'voice' | 'video' | 'thumb';
+    media: Buffer;
+    fileName: string;
+    title?: string;
+    introduction?: string;
+  }): Promise<{ mediaId: string; url?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('media', params.media, params.fileName);
+      
+      if (params.type === 'video' && (params.title || params.introduction)) {
+        const description = {
+          title: params.title || 'Video',
+          introduction: params.introduction || '',
+        };
+        formData.append('description', JSON.stringify(description));
+      }
+
+      const response = await this.httpClient.post(
+        `/cgi-bin/material/add_material?type=${params.type}`,
+        formData,
+        {
+          headers: {
+            ...formData.getHeaders(),
+          },
+        }
+      );
+
+      if (response.data.errcode) {
+        throw new Error(`Upload permanent media failed: ${response.data.errmsg} (${response.data.errcode})`);
+      }
+
+      return {
+        mediaId: response.data.media_id,
+        url: response.data.url,
+      };
+    } catch (error) {
+      logger.error('Failed to upload permanent media:', (error as any)?.message ?? String(error));
+      throw error;
+    }
+  }
+
+  /**
    * 上传图文消息图片
    */
   async uploadImg(formData: FormData): Promise<{ url: string; errcode?: number; errmsg?: string }> {

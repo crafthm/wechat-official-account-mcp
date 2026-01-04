@@ -540,9 +540,253 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     }
   };
 
-  // 处理保存草稿
-  const handleSave = () => {
-    setShowSaveDraftDialog(true);
+  // 从HTML内容中提取标题和第一张图片
+  const extractContentInfo = (htmlContent: string) => {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    
+    // 提取标题（优先使用h1，然后是h2、h3）
+    const firstHeading = tempDiv.querySelector('h1, h2, h3');
+    const title = firstHeading?.textContent?.trim() || '未命名文章';
+    
+    // 提取第一张图片
+    const firstImage = tempDiv.querySelector('img');
+    const imageSrc = firstImage?.getAttribute('src') || '';
+    
+    return { title, imageSrc };
+  };
+
+  // 创建一个默认的占位符图片（使用canvas创建640x640像素的白色PNG）
+  // 微信公众号要求封面图片至少为640x640像素
+  const createDefaultThumbImage = (): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      // 创建640x640像素的正方形图片（符合微信要求）
+      canvas.width = 640;
+      canvas.height = 640;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        // 填充浅灰色背景（比纯白色更友好）
+        ctx.fillStyle = '#F5F5F5';
+        ctx.fillRect(0, 0, 640, 640);
+        
+        // 添加一个简单的文字提示（可选）
+        ctx.fillStyle = '#CCCCCC';
+        ctx.font = '48px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('默认封面', 320, 320);
+        
+        // 转换为base64（使用JPEG格式，文件更小）
+        const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+        resolve(base64);
+      } else {
+        // 如果canvas不支持，抛出错误
+        throw new Error('浏览器不支持Canvas，无法创建默认封面图片');
+      }
+    });
+  };
+
+  // 调整图片尺寸以符合微信要求（至少640x640像素）
+  const resizeImageToFit = (imageSrc: string): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('浏览器不支持Canvas'));
+          return;
+        }
+        
+        // 微信要求封面图片至少为640x640像素
+        const minSize = 640;
+        let width = img.width;
+        let height = img.height;
+        
+        // 如果图片尺寸小于640x640，需要放大
+        if (width < minSize || height < minSize) {
+          // 保持宽高比，确保最小边至少为640
+          const scale = minSize / Math.min(width, height);
+          width = Math.max(width * scale, minSize);
+          height = Math.max(height * scale, minSize);
+        }
+        
+        // 如果是正方形，直接使用；否则裁剪为正方形
+        const size = Math.max(width, height);
+        canvas.width = size;
+        canvas.height = size;
+        
+        // 填充白色背景
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, size, size);
+        
+        // 居中绘制图片
+        const x = (size - width) / 2;
+        const y = (size - height) / 2;
+        ctx.drawImage(img, x, y, width, height);
+        
+        // 转换为base64（使用JPEG格式，质量0.9）
+        const base64 = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+        resolve(base64);
+      };
+      
+      img.onerror = () => {
+        reject(new Error('图片加载失败'));
+      };
+      
+      img.src = imageSrc;
+    });
+  };
+
+  // 上传图片并获取mediaId
+  const uploadImageAsThumb = async (imageSrc: string): Promise<string> => {
+    try {
+      // 如果是base64格式，先调整尺寸
+      if (imageSrc.startsWith('data:image/')) {
+        // 调整图片尺寸以符合微信要求
+        const resizedBase64 = await resizeImageToFit(imageSrc);
+        const fileName = 'cover.jpg';
+        
+        const response = await fetch('/api/publish/upload-thumb', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            fileData: resizedBase64,
+            fileName,
+          }),
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          return result.data.mediaId;
+        } else {
+          throw new Error(result.message || '上传封面图失败');
+        }
+      } else {
+        // 如果是外部URL，需要先下载并转换为base64
+        // 这里简化处理：提示用户需要先上传封面图片
+        throw new Error('无法从外部URL自动上传封面图片，请点击"发布"按钮手动上传封面图片');
+      }
+    } catch (error) {
+      throw error;
+    }
+  };
+
+  // 上传默认占位符图片
+  const uploadDefaultThumb = async (): Promise<string> => {
+    const base64Content = await createDefaultThumbImage();
+    // 使用jpg格式，文件更小
+    const fileName = 'default-cover.jpg';
+    
+    const response = await fetch('/api/publish/upload-thumb', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        fileData: base64Content,
+        fileName,
+      }),
+    });
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      return result.data.mediaId;
+    } else {
+      throw new Error(result.message || '上传默认封面图失败');
+    }
+  };
+
+  // 处理保存草稿（直接保存，不弹出对话框）
+  const handleSave = async () => {
+    try {
+      // 从HTML内容中提取信息
+      const { title, imageSrc } = extractContentInfo(output);
+      
+      let thumbMediaId = '';
+      
+      // 如果有图片，尝试上传第一张图片作为封面图片
+      if (imageSrc) {
+        try {
+          thumbMediaId = await uploadImageAsThumb(imageSrc);
+        } catch (error) {
+          // 如果上传失败，使用默认占位符图片
+          console.warn('上传封面图失败，使用默认占位符:', error);
+          try {
+            thumbMediaId = await uploadDefaultThumb();
+          } catch (defaultError) {
+            throw new Error('无法上传封面图片，请稍后重试');
+          }
+        }
+      } else {
+        // 如果没有图片，使用默认占位符图片
+        try {
+          thumbMediaId = await uploadDefaultThumb();
+        } catch (error) {
+          throw new Error('无法上传默认封面图片，请稍后重试');
+        }
+      }
+      
+      if (!thumbMediaId) {
+        throw new Error('无法获取封面图片');
+      }
+      
+      // 如果是编辑已有草稿，先删除旧草稿
+      if (draftData?.mediaId) {
+        try {
+          const deleteResponse = await fetch(`/api/draft/delete?mediaId=${draftData.mediaId}`, {
+            method: 'DELETE',
+          });
+          const deleteResult = await deleteResponse.json();
+          if (!deleteResult.success) {
+            console.warn('删除旧草稿失败，将继续创建新草稿:', deleteResult.message);
+          }
+        } catch (error) {
+          console.warn('删除旧草稿时出错，将继续创建新草稿:', error);
+        }
+      }
+      
+      // 调用保存草稿 API
+      const response = await fetch('/api/draft/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          content: output,
+          thumbMediaId,
+          author: draftData?.author || '',
+          digest: draftData?.digest || '',
+          showCoverPic: 1,
+          needOpenComment: 0,
+          onlyFansCanComment: 0,
+          isOriginal: 0,
+        }),
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // 如果是编辑已有草稿，提示更新成功；否则提示创建成功
+        if (draftData?.mediaId) {
+          alert(`草稿更新成功！\n新草稿ID: ${result.data.mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
+        } else {
+          handleSaveSuccess(result.data.mediaId);
+        }
+      } else {
+        alert(`保存失败：${result.message || '未知错误'}`);
+      }
+    } catch (error) {
+      console.error('保存草稿失败:', error);
+      alert(`保存失败：${error instanceof Error ? error.message : '未知错误'}`);
+    }
   };
 
   // 保存草稿成功回调

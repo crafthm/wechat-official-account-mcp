@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   FileText, 
   Trash2, 
@@ -10,7 +10,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  Upload,
 } from "lucide-react";
+import { marked } from "marked";
 
 interface Draft {
   mediaId: string;
@@ -41,6 +43,7 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageSize] = useState(20);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 获取草稿列表
   const fetchDrafts = async (offset: number = 0) => {
@@ -178,6 +181,79 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
     });
   };
 
+  // 解析markdown文件，提取标题和内容
+  const parseMarkdown = (content: string, fileName: string) => {
+    // 提取标题：优先使用第一个一级标题（#），否则使用文件名
+    let title = '';
+    let markdownContent = content;
+    
+    // 匹配第一个一级标题（# 开头，不是 ## 或 ###）
+    const titleMatch = content.match(/^#\s+(.+)$/m);
+    if (titleMatch) {
+      title = titleMatch[1].trim();
+      // 移除第一个一级标题行
+      markdownContent = content.replace(/^#\s+.+$/m, '').trim();
+    } else {
+      // 如果没有一级标题，使用文件名（去掉扩展名）
+      title = fileName.replace(/\.(md|markdown)$/i, '');
+    }
+
+    // 使用marked将markdown转换为HTML
+    const htmlContent = marked.parse(markdownContent) as string;
+
+    return {
+      title: title || '未命名文章',
+      content: htmlContent,
+    };
+  };
+
+  // 处理文件导入
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    // 检查文件类型
+    if (!file.name.match(/\.(md|markdown)$/i)) {
+      alert('请选择Markdown文件（.md或.markdown）');
+      return;
+    }
+
+    try {
+      // 读取文件内容
+      const text = await file.text();
+      
+      // 解析markdown
+      const { title, content } = parseMarkdown(text, file.name);
+
+      // 调用onEditDraft传递数据（使用空mediaId表示新文章）
+      if (onEditDraft) {
+        onEditDraft({
+          mediaId: '',
+          title,
+          content,
+        });
+      } else if (onNewArticle) {
+        // 如果没有onEditDraft，调用onNewArticle
+        onNewArticle();
+      }
+
+      // 清空文件选择，以便可以重复选择同一文件
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (error) {
+      console.error('导入文件失败:', error);
+      alert('导入文件失败，请检查文件格式');
+    }
+  };
+
+  // 触发文件选择
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div className="h-full overflow-auto bg-gray-50 dark:bg-gray-900">
       <div className="max-w-7xl mx-auto px-6 py-6">
@@ -193,6 +269,25 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
               <div className="text-sm text-gray-600 dark:text-gray-400">
                 共 {totalCount} 个草稿
               </div>
+              
+              {/* 导入按钮 */}
+              <button
+                onClick={handleImportClick}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                title="从本地导入Markdown文件"
+              >
+                <Upload className="w-4 h-4" />
+                导入
+              </button>
+              
+              {/* 隐藏的文件输入 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".md,.markdown"
+                onChange={handleImportFile}
+                className="hidden"
+              />
               
               {/* 新的创作按钮 */}
               {onNewArticle && (
