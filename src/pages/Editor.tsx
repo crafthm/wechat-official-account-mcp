@@ -76,6 +76,12 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     if (!shouldClear && !hasInitialized.current) {
       initEditorState();
       hasInitialized.current = true;
+      // 如果初始化后没有内容，标记为未编辑状态
+      // 如果有内容，标记为正在编辑（可能是从 localStorage 恢复的）
+      setTimeout(() => {
+        const currentContent = editorContent;
+        isEditingRef.current = !!currentContent.trim();
+      }, 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -181,9 +187,19 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     }
   }, [isImportedFromLocal, fileHandle, autoRefreshEnabled, refreshFileContent]);
 
+  // 使用 ref 来跟踪已加载的 draftData，避免重复加载
+  const loadedDraftMediaIdRef = useRef<string | null>(null);
+  // 使用 ref 来跟踪是否正在编辑（有内容），防止被覆盖
+  const isEditingRef = useRef(false);
+
   // 处理草稿数据加载
   useEffect(() => {
-    if (draftData) {
+    // 只有当 draftData 存在且 mediaId 发生变化时才加载
+    // 如果用户正在编辑（有内容），不覆盖
+    if (draftData && draftData.mediaId !== loadedDraftMediaIdRef.current && !isEditingRef.current) {
+      // 记录已加载的 mediaId
+      loadedDraftMediaIdRef.current = draftData.mediaId;
+      
       // 加载草稿时，不是从本地导入的
       setIsImportedFromLocal(false);
       // 将HTML内容转换为Markdown（简单处理：提取文本内容）
@@ -194,8 +210,15 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
         
         let markdown = '';
         
-        // 添加标题
-        if (draftData.title) {
+        // 检查HTML内容是否以标题开头（h1, h2, h3）
+        const firstElement = tempDiv.firstElementChild;
+        const isFirstElementHeading = firstElement && 
+          (firstElement.tagName === 'H1' || 
+           firstElement.tagName === 'H2' || 
+           firstElement.tagName === 'H3');
+        
+        // 如果内容不是以标题开头，才添加标题
+        if (draftData.title && !isFirstElementHeading) {
           markdown = `# ${draftData.title}\n\n`;
         }
         
@@ -299,8 +322,17 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
       
       const markdownContent = htmlToMarkdown(draftData.content);
       setEditorContent(markdownContent);
+      // 标记为已加载草稿，不是用户正在编辑
+      isEditingRef.current = false;
+    } else if (!draftData) {
+      // 如果 draftData 变为 null，重置已加载的 mediaId
+      loadedDraftMediaIdRef.current = null;
+      // 如果当前有内容，标记为正在编辑
+      if (editorContent.trim()) {
+        isEditingRef.current = true;
+      }
     }
-  }, [draftData, setEditorContent]);
+  }, [draftData, setEditorContent, editorContent]);
 
   // 处理清空内容（优先级最高，在其他 useEffect 之前执行）
   useEffect(() => {
@@ -314,6 +346,10 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
       setCssContent('');
       // 清空预览区域
       setOutput('');
+      // 重置已加载的草稿 mediaId
+      loadedDraftMediaIdRef.current = null;
+      // 重置编辑状态
+      isEditingRef.current = false;
       // 标记为已初始化，防止 initEditorState 再次执行
       hasInitialized.current = true;
       if (onClearComplete) {
@@ -540,20 +576,29 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     }
   };
 
-  // 从HTML内容中提取标题和第一张图片
+  // 从HTML内容中提取标题和第一张图片，并移除第二个标题元素（如果存在）
   const extractContentInfo = (htmlContent: string) => {
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = htmlContent;
     
     // 提取标题（优先使用h1，然后是h2、h3）
-    const firstHeading = tempDiv.querySelector('h1, h2, h3');
+    const headings = tempDiv.querySelectorAll('h1, h2, h3');
+    const firstHeading = headings[0];
     const title = firstHeading?.textContent?.trim() || '未命名文章';
+    
+    // 如果存在第二个标题（隔一行后的标题），移除它
+    let contentWithoutSecondTitle = htmlContent;
+    if (headings.length > 1) {
+      // 移除第二个标题（索引为1）
+      headings[1].remove();
+      contentWithoutSecondTitle = tempDiv.innerHTML;
+    }
     
     // 提取第一张图片
     const firstImage = tempDiv.querySelector('img');
     const imageSrc = firstImage?.getAttribute('src') || '';
     
-    return { title, imageSrc };
+    return { title, imageSrc, content: contentWithoutSecondTitle };
   };
 
   // 创建一个默认的占位符图片（使用canvas创建640x640像素的白色PNG）
@@ -706,8 +751,8 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
   // 处理保存草稿（直接保存，不弹出对话框）
   const handleSave = async () => {
     try {
-      // 从HTML内容中提取信息
-      const { title, imageSrc } = extractContentInfo(output);
+      // 从HTML内容中提取信息（会移除标题元素）
+      const { title, imageSrc, content: contentWithoutTitle } = extractContentInfo(output);
       
       let thumbMediaId = '';
       
@@ -737,51 +782,62 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
         throw new Error('无法获取封面图片');
       }
       
-      // 如果是编辑已有草稿，先删除旧草稿
+      // 如果是编辑已有草稿，调用更新接口
       if (draftData?.mediaId) {
-        try {
-          const deleteResponse = await fetch(`/api/draft/delete?mediaId=${draftData.mediaId}`, {
-            method: 'DELETE',
-          });
-          const deleteResult = await deleteResponse.json();
-          if (!deleteResult.success) {
-            console.warn('删除旧草稿失败，将继续创建新草稿:', deleteResult.message);
-          }
-        } catch (error) {
-          console.warn('删除旧草稿时出错，将继续创建新草稿:', error);
-        }
-      }
-      
-      // 调用保存草稿 API
-      const response = await fetch('/api/draft/save', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          content: output,
-          thumbMediaId,
-          author: draftData?.author || '',
-          digest: draftData?.digest || '',
-          showCoverPic: 1,
-          needOpenComment: 0,
-          onlyFansCanComment: 0,
-          isOriginal: 0,
-        }),
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        // 如果是编辑已有草稿，提示更新成功；否则提示创建成功
-        if (draftData?.mediaId) {
-          alert(`草稿更新成功！\n新草稿ID: ${result.data.mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
+        const response = await fetch('/api/draft/update', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            mediaId: draftData.mediaId,
+            index: 0, // 默认更新第一篇文章
+            title,
+            content: contentWithoutTitle, // 使用移除标题后的内容
+            thumbMediaId,
+            author: draftData?.author || '',
+            digest: draftData?.digest || '',
+            showCoverPic: 1,
+            needOpenComment: 0,
+            onlyFansCanComment: 0,
+            isOriginal: 0,
+          }),
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          alert(`草稿更新成功！\n草稿ID: ${draftData.mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
         } else {
-          handleSaveSuccess(result.data.mediaId);
+          alert(`更新失败：${result.message || '未知错误'}`);
         }
       } else {
-        alert(`保存失败：${result.message || '未知错误'}`);
+        // 新建草稿的逻辑
+        const response = await fetch('/api/draft/save', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title,
+            content: contentWithoutTitle, // 使用移除标题后的内容
+            thumbMediaId,
+            author: '',
+            digest: '',
+            showCoverPic: 1,
+            needOpenComment: 0,
+            onlyFansCanComment: 0,
+            isOriginal: 0,
+          }),
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          handleSaveSuccess(result.data.mediaId);
+        } else {
+          alert(`保存失败：${result.message || '未知错误'}`);
+        }
       }
     } catch (error) {
       console.error('保存草稿失败:', error);
@@ -864,7 +920,11 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
           <div className="flex-1 overflow-hidden">
             <CodeMirrorEditor
               value={editorContent}
-              onChange={setEditorContent}
+              onChange={(content) => {
+                // 用户输入时，标记为正在编辑，防止内容被覆盖
+                isEditingRef.current = true;
+                setEditorContent(content);
+              }}
               nightMode={nightMode}
               onPaste={handlePasteImage}
             />

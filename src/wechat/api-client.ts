@@ -203,6 +203,55 @@ export class WechatApiClient {
   }
 
   /**
+   * 更新草稿
+   */
+  async updateDraft(params: {
+    mediaId: string;
+    index: number; // 要更新的文章索引，从0开始
+    article: {
+      title: string;
+      author?: string;
+      digest?: string;
+      content: string;
+      contentSourceUrl?: string;
+      thumbMediaId: string;
+      showCoverPic?: number;
+      needOpenComment?: number;
+      onlyFansCanComment?: number;
+      isOriginal?: number;
+      originalSourceUrl?: string;
+    };
+  }): Promise<void> {
+    try {
+      const response = await this.httpClient.post('/cgi-bin/draft/update', {
+        media_id: params.mediaId,
+        index: params.index,
+        articles: {
+          article_type: 'news',
+          title: params.article.title,
+          author: params.article.author || '',
+          digest: params.article.digest || '',
+          content: params.article.content,
+          content_source_url: params.article.contentSourceUrl || '',
+          thumb_media_id: params.article.thumbMediaId,
+          show_cover_pic: params.article.showCoverPic !== undefined ? params.article.showCoverPic : 0,
+          need_open_comment: params.article.needOpenComment !== undefined ? params.article.needOpenComment : 0,
+          only_fans_can_comment: params.article.onlyFansCanComment !== undefined ? params.article.onlyFansCanComment : 0,
+          is_original: params.article.isOriginal !== undefined ? params.article.isOriginal : 0,
+          original_source_url: params.article.originalSourceUrl || '',
+        },
+      });
+
+      if (response.data.errcode) {
+        throw new Error(`Update draft failed: ${response.data.errmsg} (${response.data.errcode})`);
+      }
+    } catch (error) {
+      logger.error('Failed to update draft:', (error as any)?.message ?? String(error));
+      throw error;
+    }
+  }
+
+  /**
    * 发布接口
    */
   async publishDraft(mediaId: string): Promise<{ publishId: string; msgDataId: string }> {

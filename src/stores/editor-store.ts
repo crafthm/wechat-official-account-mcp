@@ -190,9 +190,21 @@ export const useEditorStore = create<EditorStore>()(
         isMacCodeBlock: state.isMacCodeBlock,
         isEditOnLeft: state.isEditOnLeft,
         previewMode: state.previewMode,
-        editorContent: state.editorContent,
-        cssContent: state.cssContent,
+        // 注意：editorContent 和 cssContent 不通过 persist 自动恢复
+        // 它们由 initEditorState 手动控制，避免覆盖用户正在输入的内容
+        // editorContent: state.editorContent,
+        // cssContent: state.cssContent,
       }),
+      // 禁用自动恢复 editorContent 和 cssContent
+      merge: (persistedState, currentState) => {
+        return {
+          ...currentState,
+          ...persistedState,
+          // 保持当前的 editorContent 和 cssContent，不从持久化状态恢复
+          editorContent: currentState.editorContent,
+          cssContent: currentState.cssContent,
+        };
+      },
     }
   )
 );

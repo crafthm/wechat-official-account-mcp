@@ -196,6 +196,75 @@ router.delete('/delete', async (req: Request, res: Response) => {
 });
 
 /**
+ * 更新草稿
+ * PUT /api/draft/update
+ */
+router.put('/update', async (req: Request, res: Response) => {
+  try {
+    const { 
+      mediaId,
+      index = 0, // 默认更新第一篇文章
+      title, 
+      content, 
+      thumbMediaId, 
+      author, 
+      digest,
+      contentSourceUrl,
+      showCoverPic = 1,
+      needOpenComment = 0,
+      onlyFansCanComment = 0,
+      isOriginal = 0,
+      originalSourceUrl,
+    } = req.body;
+    
+    if (!mediaId || !title || !content || !thumbMediaId) {
+      return res.status(400).json({
+        success: false,
+        message: 'mediaId、title、content 和 thumbMediaId 为必填项',
+      });
+    }
+    
+    const { apiClient: client } = await initializeManagers();
+    
+    // 更新草稿
+    await client!.updateDraft({
+      mediaId,
+      index,
+      article: {
+        title,
+        author: author || '',
+        digest: digest || '',
+        content,
+        contentSourceUrl: contentSourceUrl || '',
+        thumbMediaId: thumbMediaId,
+        showCoverPic: showCoverPic !== undefined ? showCoverPic : 1,
+        needOpenComment: needOpenComment !== undefined ? needOpenComment : 0,
+        onlyFansCanComment: onlyFansCanComment !== undefined ? onlyFansCanComment : 0,
+        isOriginal: isOriginal !== undefined ? isOriginal : 0,
+        originalSourceUrl: originalSourceUrl || '',
+      },
+    });
+    
+    res.json({
+      success: true,
+      message: '草稿更新成功',
+    });
+  } catch (error) {
+    console.error('更新草稿失败:', error);
+    
+    let errorMessage = error instanceof Error ? error.message : '更新草稿失败';
+    if (errorMessage.includes('85079')) {
+      errorMessage = '更新失败：公众号未开通原创声明功能。如果未勾选原创声明，请检查其他必填项。';
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: errorMessage,
+    });
+  }
+});
+
+/**
  * 保存草稿
  * POST /api/draft/save
  */

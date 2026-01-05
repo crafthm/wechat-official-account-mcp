@@ -4,8 +4,9 @@ import { z } from 'zod';
 
 // 草稿工具参数 Schema
 const draftToolSchema = z.object({
-  action: z.enum(['add', 'get', 'delete', 'list', 'count']),
+  action: z.enum(['add', 'get', 'delete', 'list', 'count', 'update']),
   mediaId: z.string().optional(),
+  index: z.number().optional(),
   articles: z.array(z.object({
     title: z.string(),
     author: z.string().optional(),
@@ -173,6 +174,50 @@ async function handleDraftTool(context: WechatToolContext): Promise<WechatToolRe
         }
       }
       
+      case 'update': {
+        const { mediaId, index = 0, articles } = validatedArgs;
+        
+        if (!mediaId) {
+          throw new Error('草稿ID不能为空');
+        }
+        
+        if (!articles || articles.length === 0) {
+          throw new Error('文章内容不能为空');
+        }
+        
+        // 更新第一篇文章
+        const article = articles[0];
+        
+        try {
+          await apiClient.updateDraft({
+            mediaId,
+            index,
+            article: {
+              title: article.title,
+              author: article.author || '',
+              digest: article.digest || '',
+              content: article.content,
+              contentSourceUrl: article.contentSourceUrl || '',
+              thumbMediaId: article.thumbMediaId,
+              showCoverPic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+              needOpenComment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+              onlyFansCanComment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+              isOriginal: article.isOriginal !== undefined ? article.isOriginal : 0,
+              originalSourceUrl: article.originalSourceUrl || '',
+            },
+          });
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `草稿更新成功！\n草稿ID: ${mediaId}\n更新文章索引: ${index}`,
+            }],
+          };
+        } catch (error) {
+          throw new Error(`更新草稿失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        }
+      }
+      
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -327,6 +372,50 @@ async function handleDraftMcpTool(args: unknown, apiClient: WechatApiClient): Pr
         }
       }
       
+      case 'update': {
+        const { mediaId, index = 0, articles } = args as any;
+        
+        if (!mediaId) {
+          throw new Error('草稿ID不能为空');
+        }
+        
+        if (!articles || articles.length === 0) {
+          throw new Error('文章内容不能为空');
+        }
+        
+        // 更新第一篇文章
+        const article = articles[0];
+        
+        try {
+          await apiClient.updateDraft({
+            mediaId,
+            index,
+            article: {
+              title: article.title,
+              author: article.author || '',
+              digest: article.digest || '',
+              content: article.content,
+              contentSourceUrl: article.contentSourceUrl || '',
+              thumbMediaId: article.thumbMediaId,
+              showCoverPic: article.showCoverPic !== undefined ? article.showCoverPic : 0,
+              needOpenComment: article.needOpenComment !== undefined ? article.needOpenComment : 0,
+              onlyFansCanComment: article.onlyFansCanComment !== undefined ? article.onlyFansCanComment : 0,
+              isOriginal: article.isOriginal !== undefined ? article.isOriginal : 0,
+              originalSourceUrl: article.originalSourceUrl || '',
+            },
+          });
+          
+          return {
+            content: [{
+              type: 'text',
+              text: `草稿更新成功！\n草稿ID: ${mediaId}\n更新文章索引: ${index}`,
+            }],
+          };
+        } catch (error) {
+          throw new Error(`更新草稿失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        }
+      }
+      
       default:
         throw new Error(`Unknown action: ${action}`);
     }
@@ -353,12 +442,16 @@ export const draftTool: WechatToolDefinition = {
     properties: {
       action: {
         type: 'string',
-        enum: ['add', 'get', 'delete', 'list', 'count'],
+        enum: ['add', 'get', 'delete', 'list', 'count', 'update'],
         description: '操作类型',
       },
       mediaId: {
         type: 'string',
         description: '草稿 Media ID',
+      },
+      index: {
+        type: 'number',
+        description: '要更新的文章索引（从0开始，更新时使用）',
       },
     },
     required: ['action'],
@@ -373,8 +466,9 @@ export const draftMcpTool: McpTool = {
   name: 'wechat_draft',
   description: '管理微信公众号草稿',
   inputSchema: {
-    action: z.enum(['add', 'get', 'delete', 'list', 'count']).describe('操作类型：add(创建), get(获取), delete(删除), list(列表), count(统计)'),
-    mediaId: z.string().optional().describe('草稿 Media ID（获取、删除时必需）'),
+    action: z.enum(['add', 'get', 'delete', 'list', 'count', 'update']).describe('操作类型：add(创建), get(获取), delete(删除), list(列表), count(统计), update(更新)'),
+    mediaId: z.string().optional().describe('草稿 Media ID（获取、删除、更新时必需）'),
+    index: z.number().optional().describe('要更新的文章索引（从0开始，更新时使用，默认为0）'),
     articles: z.array(z.object({
       title: z.string().describe('文章标题'),
       author: z.string().optional().describe('作者'),
@@ -387,7 +481,7 @@ export const draftMcpTool: McpTool = {
       onlyFansCanComment: z.number().optional().describe('是否仅粉丝可评论'),
       isOriginal: z.number().optional().describe('是否声明原创（0/1，需要公众号已开通原创声明功能）'),
       originalSourceUrl: z.string().optional().describe('原文链接（声明原创时可能需要）'),
-    })).optional().describe('文章列表（创建时必需）'),
+    })).optional().describe('文章列表（创建、更新时必需）'),
     offset: z.number().optional().describe('偏移量（列表时使用）'),
     count: z.number().optional().describe('数量（列表时使用）'),
   },

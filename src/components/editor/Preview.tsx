@@ -46,7 +46,10 @@ export function Preview({ content, cssContent, className = '' }: PreviewProps) {
 
     // 获取渲染器实例
     const wxRenderer = renderer.getRenderer(citeStatus);
-    marked.setOptions({ renderer: wxRenderer });
+    marked.setOptions({ 
+      renderer: wxRenderer,
+      breaks: true, // 启用换行支持，单个换行符也会转换为 <br>
+    });
 
     // 渲染 Markdown
     const parseResult = marked.parse(content);

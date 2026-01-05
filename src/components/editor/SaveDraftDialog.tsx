@@ -111,6 +111,19 @@ export function SaveDraftDialog({
     }
   };
 
+  // 从HTML内容中移除第二个标题元素（如果存在）
+  const removeSecondTitleFromContent = (htmlContent: string): string => {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    const headings = tempDiv.querySelectorAll('h1, h2, h3');
+    // 如果存在第二个标题（索引为1），移除它
+    if (headings.length > 1) {
+      headings[1].remove();
+      return tempDiv.innerHTML;
+    }
+    return htmlContent;
+  };
+
   const handleSave = async () => {
     if (!title.trim()) {
       setError('请输入文章标题');
@@ -132,6 +145,9 @@ export function SaveDraftDialog({
       if (!finalThumbMediaId && coverImage) {
         finalThumbMediaId = await uploadCoverImage();
       }
+
+      // 从内容中移除第二个标题（如果存在），保留第一个标题
+      const contentWithoutSecondTitle = removeSecondTitleFromContent(htmlContent);
 
       // 如果勾选了保存到本地，先保存到本地
       if (saveToLocal && markdownContent) {
@@ -158,7 +174,7 @@ export function SaveDraftDialog({
         author: author || '',
         digest: digest || '',
         contentSourceUrl: contentSourceUrl || '',
-        content: htmlContent,
+        content: contentWithoutSecondTitle,
         thumbMediaId: finalThumbMediaId,
         showCoverPic: showCoverPic ? 1 : 0,
         needOpenComment: needOpenComment ? 1 : 0,
