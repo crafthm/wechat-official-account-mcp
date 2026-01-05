@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Plus,
   Upload,
+  Cloud,
+  FolderOpen,
 } from "lucide-react";
 import { marked } from "marked";
 
@@ -44,6 +46,17 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
   const [pageSize] = useState(20);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 判断草稿是否来自本地导入
+  const isImportedDraft = (mediaId: string): boolean => {
+    try {
+      const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+      return importedDrafts.includes(mediaId);
+    } catch (error) {
+      console.error('读取导入标记失败:', error);
+      return false;
+    }
+  };
 
   // 获取草稿列表
   const fetchDrafts = async (offset: number = 0) => {
@@ -331,29 +344,64 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
           ) : (
             <>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                {drafts.map((draft) => (
-                  <div
-                    key={draft.mediaId}
-                    className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                  >
-                    <div className="flex items-start gap-4">
-                      {/* 封面图占位 */}
-                      <div className="flex-shrink-0 w-32 h-24 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center">
-                        <FileImage className="w-8 h-8 text-gray-400 dark:text-gray-500" />
-                      </div>
-                      
-                      {/* 内容区域 */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-4 mb-2">
-                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
-                            {draft.title}
-                          </h3>
-                          {draft.articleCount > 1 && (
-                            <span className="flex-shrink-0 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded">
-                              共{draft.articleCount}篇
-                            </span>
-                          )}
+                {drafts.map((draft) => {
+                  const isImported = isImportedDraft(draft.mediaId);
+                  
+                  return (
+                    <div
+                      key={draft.mediaId}
+                      className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="flex items-start gap-4">
+                        {/* 封面图占位 */}
+                        <div className="flex-shrink-0 w-32 h-24 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center relative">
+                          <FileImage className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                          {/* 来源标识图标（右上角） */}
+                          <div className="absolute top-1 right-1">
+                            {isImported ? (
+                              <div 
+                                className="bg-green-500 rounded-full p-1.5 shadow-sm" 
+                                title="本地导入的文章"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5 text-white" />
+                              </div>
+                            ) : (
+                              <div 
+                                className="bg-blue-500 rounded-full p-1.5 shadow-sm" 
+                                title="公众号草稿箱的文章"
+                              >
+                                <Cloud className="w-3.5 h-3.5 text-white" />
+                              </div>
+                            )}
+                          </div>
                         </div>
+                        
+                        {/* 内容区域 */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-4 mb-2">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                                {draft.title}
+                              </h3>
+                              {/* 来源标识（文字标签） */}
+                              {isImported ? (
+                                <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded whitespace-nowrap">
+                                  <FolderOpen className="w-3 h-3" />
+                                  本地导入
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded whitespace-nowrap">
+                                  <Cloud className="w-3 h-3" />
+                                  公众号草稿
+                                </span>
+                              )}
+                            </div>
+                            {draft.articleCount > 1 && (
+                              <span className="flex-shrink-0 px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded">
+                                共{draft.articleCount}篇
+                              </span>
+                            )}
+                          </div>
                         
                         {draft.digest && (
                           <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
@@ -395,7 +443,8 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               
               {/* 分页 */}

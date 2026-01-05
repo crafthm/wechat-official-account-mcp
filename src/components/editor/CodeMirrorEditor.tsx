@@ -11,6 +11,7 @@ interface CodeMirrorEditorProps {
   onChange: (value: string) => void;
   nightMode?: boolean;
   onPaste?: (file: File) => void;
+  readOnly?: boolean;
 }
 
 export function CodeMirrorEditor({
@@ -18,9 +19,13 @@ export function CodeMirrorEditor({
   onChange,
   nightMode = false,
   onPaste,
+  readOnly = false,
 }: CodeMirrorEditorProps) {
   const editorRef = useRef<EditorView | null>(null);
   const { isEditOnLeft } = useEditorStore();
+  // 使用ref跟踪上一次的value，避免不必要的更新导致内容丢失
+  const lastValueRef = useRef<string>(value);
+  const isInternalUpdateRef = useRef(false);
 
   useEffect(() => {
     // 处理粘贴事件
@@ -49,6 +54,7 @@ export function CodeMirrorEditor({
   const extensions = [
     markdown(),
     EditorView.lineWrapping,
+    EditorView.editable.of(!readOnly),
     EditorView.theme({
       '&': {
         fontSize: '14px',
@@ -68,11 +74,16 @@ export function CodeMirrorEditor({
     }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        // 防抖处理
-        const timeoutId = setTimeout(() => {
-          onChange(update.state.doc.toString());
-        }, 300);
-        return () => clearTimeout(timeoutId);
+        // 立即调用onChange，不使用防抖，避免输入内容丢失
+        // 之前的防抖会导致用户输入的内容在延迟期间被value prop覆盖
+        const newContent = update.state.doc.toString();
+        isInternalUpdateRef.current = true;
+        lastValueRef.current = newContent;
+        onChange(newContent);
+        // 重置标记，使用setTimeout确保在下一个事件循环中重置
+        setTimeout(() => {
+          isInternalUpdateRef.current = false;
+        }, 0);
       }
     }),
     // 快捷键支持
@@ -204,6 +215,13 @@ export function CodeMirrorEditor({
       },
     })
   );
+
+  // 更新lastValueRef，用于跟踪value的变化
+  useEffect(() => {
+    if (!isInternalUpdateRef.current) {
+      lastValueRef.current = value || '';
+    }
+  }, [value]);
 
   return (
     <div className="h-full w-full" style={{ display: 'flex', flexDirection: 'column' }}>

@@ -28,6 +28,12 @@ export class AuthManager {
     // 加载 Access Token
     this.tokenInfo = await this.storageManager.getAccessToken();
     
+    // 如果存在旧的普通 access_token，清除它以确保使用稳定版 access_token
+    // 稳定版 access_token 和普通 access_token 不兼容，需要重新获取
+    if (this.tokenInfo) {
+      logger.info('Found existing access token, will use stable access token API for refresh');
+    }
+    
     logger.info('AuthManager initialized');
   }
 
@@ -60,30 +66,46 @@ export class AuthManager {
    */
   async getAccessToken(): Promise<AccessTokenInfo> {
     // 检查是否有有效的 Token
+    // 注意：即使 token 未过期，如果是从普通 access_token API 获取的，也应该刷新为稳定版
     if (this.tokenInfo && this.tokenInfo.expiresAt > Date.now() + 60000) { // 提前1分钟刷新
       return this.tokenInfo;
     }
 
-    // 刷新 Token
+    // 刷新 Token（使用稳定版 access_token）
     return await this.refreshAccessToken();
   }
 
   /**
-   * 刷新 Access Token
+   * 刷新 Access Token（使用稳定版 access_token）
+   * 稳定版 access_token 更稳定，不会频繁过期，推荐使用
+   * @param forceRefresh 是否强制刷新（默认 false）
    */
-  async refreshAccessToken(): Promise<AccessTokenInfo> {
+  async refreshAccessToken(forceRefresh: boolean = false): Promise<AccessTokenInfo> {
     if (!this.config) {
       throw new Error('Wechat config not found. Please configure first.');
     }
 
     try {
-      const response = await axios.get('https://api.weixin.qq.com/cgi-bin/token', {
-        params: {
-          grant_type: 'client_credential',
-          appid: this.config.appId,
-          secret: this.config.appSecret,
-        },
+      // 如果强制刷新，先清除旧的 token（可能是普通 access_token）
+      if (forceRefresh) {
+        logger.info('Force refresh requested, clearing old token');
+        this.tokenInfo = null;
+        await this.storageManager.clearAccessToken();
+      }
+      
+      // 使用稳定版 access_token API
+      // 参考：https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html
+      logger.info(`Requesting stable access token (force_refresh: ${forceRefresh ? 1 : 0})`);
+      const response = await axios.post('https://api.weixin.qq.com/cgi-bin/stable_token', {
+        grant_type: 'client_credential',
+        appid: this.config.appId,
+        secret: this.config.appSecret,
+        force_refresh: forceRefresh ? 1 : 0, // 0: 不强制刷新，使用缓存的 token；1: 强制刷新
+      }, {
         timeout: 10000,
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
 
       if (response.data.errcode) {
@@ -105,10 +127,11 @@ export class AuthManager {
           );
         }
         
-        throw new Error(`Failed to get access token: ${errorMsg} (${errorCode})`);
+        throw new Error(`Failed to get stable access token: ${errorMsg} (${errorCode})`);
       }
 
       const { access_token, expires_in } = response.data;
+      // 稳定版 access_token 的有效期通常是 7200 秒（2小时），但可能更长
       const expiresAt = Date.now() + (expires_in * 1000);
 
       this.tokenInfo = {
@@ -120,12 +143,20 @@ export class AuthManager {
       // 保存到存储
       await this.storageManager.saveAccessToken(this.tokenInfo);
       
-      logger.info('Access token refreshed successfully');
+      logger.info('Stable access token refreshed successfully');
       return this.tokenInfo;
     } catch (error) {
-      logger.error('Failed to refresh access token:', error);
+      logger.error('Failed to refresh stable access token:', error);
       throw error;
     }
+  }
+
+  /**
+   * 获取稳定版 Access Token（别名方法，与 getAccessToken 功能相同）
+   * 为了兼容错误提示中的 getStableAccessToken 方法名
+   */
+  async getStableAccessToken(): Promise<AccessTokenInfo> {
+    return await this.getAccessToken();
   }
 
   /**

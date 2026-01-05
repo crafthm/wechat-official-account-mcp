@@ -78,7 +78,7 @@ export function EditorHeader({
   ];
 
   return (
-    <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-2 flex items-center justify-between">
+    <div className="flex items-center justify-between w-full">
       <div className="flex items-center space-x-2">
         {/* 文件菜单 */}
         <Menu as="div" className="relative">

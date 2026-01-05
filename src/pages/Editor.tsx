@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { Eye, Edit } from 'lucide-react';
 import { useEditorStore } from '@/stores/editor-store';
 import { CodeMirrorEditor } from '@/components/editor/CodeMirrorEditor';
 import { Preview } from '@/components/editor/Preview';
@@ -28,9 +29,10 @@ interface EditorProps {
   } | null;
   shouldClear?: boolean;
   onClearComplete?: () => void;
+  isViewMode?: boolean; // 是否为查看模式
 }
 
-export default function Editor({ draftData, shouldClear, onClearComplete }: EditorProps = {}) {
+export default function Editor({ draftData, shouldClear, onClearComplete, isViewMode: initialViewMode = false }: EditorProps = {}) {
   const {
     editorContent,
     cssContent,
@@ -47,6 +49,9 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     setWxRenderer,
   } = useEditorStore();
 
+  // 内部状态控制查看/编辑模式切换（如果有 draftData，初始为查看模式；否则为编辑模式）
+  const [isViewMode, setIsViewMode] = useState(initialViewMode || (draftData ? true : false));
+  
   const [showCssEditor, setShowCssEditor] = useState(false);
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [showTableDialog, setShowTableDialog] = useState(false);
@@ -76,12 +81,6 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
     if (!shouldClear && !hasInitialized.current) {
       initEditorState();
       hasInitialized.current = true;
-      // 如果初始化后没有内容，标记为未编辑状态
-      // 如果有内容，标记为正在编辑（可能是从 localStorage 恢复的）
-      setTimeout(() => {
-        const currentContent = editorContent;
-        isEditingRef.current = !!currentContent.trim();
-      }, 0);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -189,14 +188,36 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
 
   // 使用 ref 来跟踪已加载的 draftData，避免重复加载
   const loadedDraftMediaIdRef = useRef<string | null>(null);
-  // 使用 ref 来跟踪是否正在编辑（有内容），防止被覆盖
-  const isEditingRef = useRef(false);
+
+  // 当 draftData 变化时，重置查看模式（如果有草稿数据，默认进入查看模式）
+  useEffect(() => {
+    if (draftData) {
+      // 只有当 mediaId 真正变化时，才重置状态
+      if (draftData.mediaId !== loadedDraftMediaIdRef.current) {
+        // 如果有草稿数据且是新的草稿，默认进入查看模式
+        setIsViewMode(true);
+      }
+      // 如果 mediaId 相同，不改变查看/编辑模式
+    } else {
+      // 如果没有草稿数据，进入编辑模式
+      setIsViewMode(false);
+    }
+  }, [draftData]);
 
   // 处理草稿数据加载
   useEffect(() => {
-    // 只有当 draftData 存在且 mediaId 发生变化时才加载
-    // 如果用户正在编辑（有内容），不覆盖
-    if (draftData && draftData.mediaId !== loadedDraftMediaIdRef.current && !isEditingRef.current) {
+    // 简化逻辑：只在查看模式中同步草稿内容，编辑模式不允许同步
+    if (!isViewMode) {
+      // 编辑模式：不允许同步，直接返回
+      // 如果 mediaId 变化了，更新 loadedDraftMediaIdRef 避免重复检查
+      if (draftData && draftData.mediaId !== loadedDraftMediaIdRef.current) {
+        loadedDraftMediaIdRef.current = draftData.mediaId;
+      }
+      return;
+    }
+    
+    // 查看模式：允许同步草稿内容
+    if (draftData && draftData.mediaId !== loadedDraftMediaIdRef.current) {
       // 记录已加载的 mediaId
       loadedDraftMediaIdRef.current = draftData.mediaId;
       
@@ -322,17 +343,14 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
       
       const markdownContent = htmlToMarkdown(draftData.content);
       setEditorContent(markdownContent);
-      // 标记为已加载草稿，不是用户正在编辑
-      isEditingRef.current = false;
     } else if (!draftData) {
       // 如果 draftData 变为 null，重置已加载的 mediaId
       loadedDraftMediaIdRef.current = null;
-      // 如果当前有内容，标记为正在编辑
-      if (editorContent.trim()) {
-        isEditingRef.current = true;
-      }
     }
-  }, [draftData, setEditorContent, editorContent]);
+    // 注意：editorContent 不应该作为依赖项，因为每次用户输入都会触发这个 useEffect
+    // 我们只关心 draftData 和 isViewMode 的变化
+    // 但是我们需要在 useEffect 内部读取 editorContent 的当前值来判断是否有内容
+  }, [draftData, setEditorContent, isViewMode]);
 
   // 处理清空内容（优先级最高，在其他 useEffect 之前执行）
   useEffect(() => {
@@ -348,8 +366,6 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
       setOutput('');
       // 重置已加载的草稿 mediaId
       loadedDraftMediaIdRef.current = null;
-      // 重置编辑状态
-      isEditingRef.current = false;
       // 标记为已初始化，防止 initEditorState 再次执行
       hasInitialized.current = true;
       if (onClearComplete) {
@@ -807,6 +823,18 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
         const result = await response.json();
         
         if (result.success) {
+          // 如果是从本地导入的，确保标记已记录（更新时也保持标记）
+          if (isImportedFromLocal) {
+            try {
+              const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+              if (!importedDrafts.includes(draftData.mediaId)) {
+                importedDrafts.push(draftData.mediaId);
+                localStorage.setItem('imported_drafts', JSON.stringify(importedDrafts));
+              }
+            } catch (error) {
+              console.error('保存导入标记失败:', error);
+            }
+          }
           alert(`草稿更新成功！\n草稿ID: ${draftData.mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
         } else {
           alert(`更新失败：${result.message || '未知错误'}`);
@@ -847,6 +875,18 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
 
   // 保存草稿成功回调
   const handleSaveSuccess = (mediaId: string) => {
+    // 如果是从本地导入的，记录到 localStorage
+    if (isImportedFromLocal) {
+      try {
+        const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+        if (!importedDrafts.includes(mediaId)) {
+          importedDrafts.push(mediaId);
+          localStorage.setItem('imported_drafts', JSON.stringify(importedDrafts));
+        }
+      } catch (error) {
+        console.error('保存导入标记失败:', error);
+      }
+    }
     alert(`草稿保存成功！\n草稿ID: ${mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
   };
 
@@ -892,20 +932,54 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
       }`}
     >
       {/* 头部工具栏 */}
-      <EditorHeader
-        onImportMD={handleImportMD}
-        onUploadImage={() => setShowUploadDialog(true)}
-        onInsertTable={() => setShowTableDialog(true)}
-        onShowCssEditor={() => setShowCssEditor(true)}
-        onCopy={handleCopy}
-        onSave={handleSave}
-        onPublish={handlePublish}
-        onRefresh={refreshFileContent}
-        isImportedFromLocal={isImportedFromLocal}
-        autoRefreshEnabled={autoRefreshEnabled && !!fileHandle}
-        editorContent={editorContent}
-        outputHtml={output}
-      />
+      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            {/* 查看/编辑模式切换按钮 */}
+            {draftData && (
+              <button
+                onClick={() => {
+                  setIsViewMode(!isViewMode);
+                }}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+                  isViewMode
+                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                    : 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400'
+                }`}
+                title={isViewMode ? '切换到编辑模式' : '切换到查看模式'}
+              >
+                {isViewMode ? (
+                  <>
+                    <Eye className="w-4 h-4" />
+                    <span>查看</span>
+                  </>
+                ) : (
+                  <>
+                    <Edit className="w-4 h-4" />
+                    <span>编辑</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+          <div className="flex-1">
+            <EditorHeader
+              onImportMD={handleImportMD}
+              onUploadImage={() => setShowUploadDialog(true)}
+              onInsertTable={() => setShowTableDialog(true)}
+              onShowCssEditor={() => setShowCssEditor(true)}
+              onCopy={handleCopy}
+              onSave={isViewMode ? undefined : handleSave}
+              onPublish={isViewMode ? undefined : handlePublish}
+              onRefresh={refreshFileContent}
+              isImportedFromLocal={isImportedFromLocal}
+              autoRefreshEnabled={autoRefreshEnabled && !!fileHandle}
+              editorContent={editorContent}
+              outputHtml={output}
+            />
+          </div>
+        </div>
+      </div>
 
       {/* 主编辑区域 */}
       <div className="flex flex-1 overflow-hidden">
@@ -921,12 +995,14 @@ export default function Editor({ draftData, shouldClear, onClearComplete }: Edit
             <CodeMirrorEditor
               value={editorContent}
               onChange={(content) => {
-                // 用户输入时，标记为正在编辑，防止内容被覆盖
-                isEditingRef.current = true;
-                setEditorContent(content);
+                // 只在非查看模式下允许编辑
+                if (!isViewMode) {
+                  setEditorContent(content);
+                }
               }}
               nightMode={nightMode}
               onPaste={handlePasteImage}
+              readOnly={isViewMode}
             />
           </div>
           {/* 状态栏 */}

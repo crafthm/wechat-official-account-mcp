@@ -28,11 +28,58 @@ export class WechatApiClient {
       return config;
     });
 
-    // 响应拦截器：处理错误
+    // 响应拦截器：处理错误，特别是 access_token 无效的情况
     this.httpClient.interceptors.response.use(
       (response) => response,
-      (error) => {
+      async (error) => {
         const status = error?.response?.status;
+        const errorData = error?.response?.data;
+        const errorCode = errorData?.errcode;
+        const errorMsg = errorData?.errmsg || '';
+        
+        // 处理 access_token 无效或过期的错误（40001）
+        // 错误消息可能包含：invalid credential, access_token is invalid or not latest
+        // 当遇到这个错误时，强制刷新 token 并重试一次
+        if (errorCode === 40001 && (
+          errorMsg.includes('access_token') || 
+          errorMsg.includes('invalid credential') ||
+          errorMsg.includes('not latest')
+        )) {
+          // 检查是否已经重试过（防止无限重试）
+          const config = error.config;
+          if (config && !config.__retryTokenRefresh) {
+            logger.warn('Access token invalid, refreshing and retrying...');
+            
+            try {
+              // 标记为已重试
+              config.__retryTokenRefresh = true;
+              
+              // 清除内存和数据库中的旧 token，确保获取新的稳定版 access_token
+              // 稳定版 access_token 和普通 access_token 不兼容，必须清除旧的
+              logger.info('Clearing old access token (may be regular token, incompatible with stable token)');
+              this.authManager['tokenInfo'] = null;
+              await this.authManager['storageManager'].clearAccessToken();
+              
+              // 强制刷新 token（使用 force_refresh=true）
+              // 这会获取新的稳定版 access_token
+              logger.info('Force refreshing stable access token due to 40001 error');
+              await this.authManager.refreshAccessToken(true);
+              
+              // 更新 access_token
+              const tokenInfo = await this.authManager.getAccessToken();
+              // 移除旧的 access_token（如果存在）
+              config.url = config.url.replace(/[?&]access_token=[^&]*/, '');
+              config.url += `${config.url.includes('?') ? '&' : '?'}access_token=${tokenInfo.accessToken}`;
+              
+              // 重试请求
+              return this.httpClient.request(config);
+            } catch (refreshError) {
+              logger.error('Failed to refresh token and retry:', refreshError);
+              throw new Error(`Access token 无效，且刷新失败: ${refreshError instanceof Error ? refreshError.message : String(refreshError)}`);
+            }
+          }
+        }
+        
         logger.error('Wechat API request failed:', status ? String(status) : error?.message);
         throw error;
       }
