@@ -248,18 +248,6 @@ export default function Config() {
             </h1>
           </div>
 
-          {message && (
-            <div
-              className={`mb-4 p-3 rounded-lg ${
-                message.type === "success"
-                  ? "bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200"
-                  : "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200"
-              }`}
-            >
-              {message.text}
-            </div>
-          )}
-
           <div className="space-y-6">
             {/* AppID */}
             <div>
@@ -438,6 +426,19 @@ export default function Config() {
                 测试连接
               </button>
             </div>
+            
+            {/* 结果显示 */}
+            {message && (
+              <div
+                className={`p-3 rounded-lg ${
+                  message.type === "success"
+                    ? "bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200"
+                    : "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200"
+                }`}
+              >
+                {message.text}
+              </div>
+            )}
           </div>
         </div>
 

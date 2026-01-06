@@ -38,8 +38,21 @@ interface DraftBoxProps {
   onNewArticle?: () => void;
 }
 
+// 本地导入的草稿接口
+interface LocalDraft {
+  mediaId: string;
+  title: string;
+  content: string;
+  author?: string;
+  digest?: string;
+  createTime: number;
+  updateTime: number;
+  filePath: string;
+}
+
 export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
   const [loading, setLoading] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -47,15 +60,61 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 判断草稿是否来自本地导入
-  const isImportedDraft = (mediaId: string): boolean => {
+  // 从 localStorage 加载本地草稿
+  const loadLocalDrafts = () => {
     try {
       const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
-      return importedDrafts.includes(mediaId);
+      // 兼容旧格式：如果是字符串数组，转换为对象数组
+      if (Array.isArray(importedDrafts) && importedDrafts.length > 0) {
+        if (typeof importedDrafts[0] === 'string') {
+          // 旧格式，无法恢复完整信息，返回空数组
+          return [];
+        } else {
+          // 新格式，从 localStorage 读取草稿详情
+          const drafts: LocalDraft[] = [];
+          importedDrafts.forEach((item: any) => {
+            if (item.mediaId && item.filePath) {
+              // 尝试从 localStorage 读取草稿详情
+              const draftKey = `local_draft_${item.mediaId}`;
+              const draftData = localStorage.getItem(draftKey);
+              if (draftData) {
+                try {
+                  const parsed = JSON.parse(draftData);
+                  drafts.push({
+                    mediaId: item.mediaId,
+                    title: parsed.title || '未命名文章',
+                    content: parsed.content || '',
+                    author: parsed.author,
+                    digest: parsed.digest,
+                    createTime: parsed.createTime || Date.now(),
+                    updateTime: parsed.updateTime || Date.now(),
+                    filePath: item.filePath || '',
+                  });
+                } catch (e) {
+                  console.error('解析草稿数据失败:', e);
+                }
+              }
+            }
+          });
+          return drafts;
+        }
+      }
+      return [];
     } catch (error) {
-      console.error('读取导入标记失败:', error);
-      return false;
+      console.error('读取本地草稿失败:', error);
+      return [];
     }
+  };
+
+  // 判断草稿是否来自本地导入
+  const isImportedDraft = (mediaId: string): boolean => {
+    return localDrafts.some(draft => draft.mediaId === mediaId);
+  };
+
+  // 获取草稿的文件路径
+  const getDraftFilePath = (mediaId: string): string => {
+    const localDraft = localDrafts.find(draft => draft.mediaId === mediaId);
+    return localDraft?.filePath || '';
   };
 
   // 获取草稿列表
@@ -109,6 +168,39 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
       return;
     }
 
+    // 检查是否是本地草稿
+    const localDraft = localDrafts.find(draft => draft.mediaId === mediaId);
+    if (localDraft) {
+      // 删除本地草稿
+      setDeletingId(mediaId);
+      try {
+        // 从 state 中移除
+        setLocalDrafts(prev => prev.filter(draft => draft.mediaId !== mediaId));
+        
+        // 从 localStorage 中删除
+        const draftKey = `local_draft_${mediaId}`;
+        localStorage.removeItem(draftKey);
+        
+        // 从导入标记列表中移除
+        const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+        const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+          ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+          : importedDrafts;
+        
+        const filtered = normalizedDrafts.filter((item: any) => 
+          (typeof item === 'string' ? item : item.mediaId) !== mediaId
+        );
+        localStorage.setItem('imported_drafts', JSON.stringify(filtered));
+      } catch (error) {
+        console.error('删除本地草稿失败:', error);
+        alert('删除失败');
+      } finally {
+        setDeletingId(null);
+      }
+      return;
+    }
+
+    // 公众号草稿，调用 API 删除
     setDeletingId(mediaId);
     try {
       const response = await fetch(`/api/draft/delete?mediaId=${mediaId}`, {
@@ -133,6 +225,23 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
 
   // 编辑草稿
   const handleEdit = async (mediaId: string) => {
+    // 检查是否是本地草稿
+    const localDraft = localDrafts.find(draft => draft.mediaId === mediaId);
+    if (localDraft) {
+      // 本地草稿，直接调用 onEditDraft
+      if (onEditDraft) {
+        onEditDraft({
+          mediaId: localDraft.mediaId,
+          title: localDraft.title,
+          content: localDraft.content,
+          author: localDraft.author,
+          digest: localDraft.digest,
+        });
+      }
+      return;
+    }
+
+    // 公众号草稿，从 API 获取
     try {
       const response = await fetch(`/api/draft/get?mediaId=${mediaId}`);
       const result = await response.json();
@@ -163,6 +272,8 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
   useEffect(() => {
     fetchDrafts(0);
     fetchCount();
+    // 加载本地草稿
+    setLocalDrafts(loadLocalDrafts());
   }, []);
 
   // 分页处理
@@ -240,16 +351,56 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
       // 解析markdown
       const { title, content } = parseMarkdown(text, file.name);
 
-      // 调用onEditDraft传递数据（使用空mediaId表示新文章）
-      if (onEditDraft) {
-        onEditDraft({
-          mediaId: '',
+      // 生成唯一的 mediaId（使用时间戳+随机数）
+      const mediaId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = Date.now();
+
+      // 创建本地草稿对象
+      const localDraft: LocalDraft = {
+        mediaId,
+        title,
+        content,
+        createTime: now,
+        updateTime: now,
+        filePath: file.name,
+      };
+
+      // 添加到本地草稿列表
+      setLocalDrafts(prev => [...prev, localDraft]);
+
+      // 保存到 localStorage
+      try {
+        // 保存草稿详情
+        const draftKey = `local_draft_${mediaId}`;
+        localStorage.setItem(draftKey, JSON.stringify({
           title,
           content,
-        });
-      } else if (onNewArticle) {
-        // 如果没有onEditDraft，调用onNewArticle
-        onNewArticle();
+          createTime: now,
+          updateTime: now,
+        }));
+
+        // 更新导入标记列表
+        const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+        const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+          ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+          : importedDrafts;
+        
+        const existingIndex = normalizedDrafts.findIndex((item: any) => 
+          (typeof item === 'string' ? item : item.mediaId) === mediaId
+        );
+        
+        if (existingIndex >= 0) {
+          if (typeof normalizedDrafts[existingIndex] === 'object') {
+            normalizedDrafts[existingIndex].filePath = file.name;
+          } else {
+            normalizedDrafts[existingIndex] = { mediaId, filePath: file.name };
+          }
+        } else {
+          normalizedDrafts.push({ mediaId, filePath: file.name });
+        }
+        localStorage.setItem('imported_drafts', JSON.stringify(normalizedDrafts));
+      } catch (error) {
+        console.error('保存导入标记失败:', error);
       }
 
       // 清空文件选择，以便可以重复选择同一文件
@@ -280,7 +431,7 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
             {/* 右侧操作区 */}
             <div className="flex items-center gap-4">
               <div className="text-sm text-gray-600 dark:text-gray-400">
-                共 {totalCount} 个草稿
+                共 {totalCount + localDrafts.length} 个草稿
               </div>
               
               {/* 导入按钮 */}
@@ -318,6 +469,8 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
                 onClick={() => {
                   fetchDrafts(currentPage * pageSize);
                   fetchCount();
+                  // 重新加载本地草稿
+                  setLocalDrafts(loadLocalDrafts());
                 }}
                 disabled={loading}
                 className="flex items-center gap-2 px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
@@ -331,12 +484,12 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
 
         {/* 草稿列表 */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm">
-          {loading && drafts.length === 0 ? (
+          {loading && drafts.length === 0 && localDrafts.length === 0 ? (
             <div className="p-12 text-center">
               <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-4 text-gray-400" />
               <p className="text-gray-500 dark:text-gray-400">加载中...</p>
             </div>
-          ) : drafts.length === 0 ? (
+          ) : drafts.length === 0 && localDrafts.length === 0 ? (
             <div className="p-12 text-center">
               <FileText className="w-16 h-16 mx-auto mb-4 text-gray-400 dark:text-gray-500" />
               <p className="text-gray-500 dark:text-gray-400">暂无草稿</p>
@@ -344,8 +497,104 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
           ) : (
             <>
               <div className="divide-y divide-gray-200 dark:divide-gray-700">
+                {/* 显示本地草稿 */}
+                {localDrafts.map((draft) => {
+                  const filePath = draft.filePath;
+                  
+                  return (
+                    <div
+                      key={draft.mediaId}
+                      className="p-6 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      <div className="flex items-start gap-4">
+                        {/* 封面图占位 */}
+                        <div className="flex-shrink-0 w-32 h-24 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center relative">
+                          <FileImage className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                          {/* 来源标识图标（右上角） */}
+                          <div className="absolute top-1 right-1">
+                            <div 
+                              className="bg-green-500 rounded-full p-1.5 shadow-sm" 
+                              title="本地导入的文章"
+                            >
+                              <FolderOpen className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* 内容区域 */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-4 mb-2">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate">
+                                {draft.title}
+                              </h3>
+                              {/* 来源标识（文字标签） */}
+                              <span className="flex items-center gap-1 px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 rounded whitespace-nowrap">
+                                <FolderOpen className="w-3 h-3" />
+                                本地导入
+                              </span>
+                            </div>
+                          </div>
+                        
+                        {draft.digest && (
+                          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
+                            {draft.digest}
+                          </p>
+                        )}
+
+                        {/* 文件路径显示 */}
+                        {filePath && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                              <FolderOpen className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate" title={filePath}>
+                                文件路径: {filePath}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        
+                        <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
+                          {draft.author && (
+                            <div className="flex items-center gap-1">
+                              <User className="w-4 h-4" />
+                              <span>{draft.author}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            <span>更新: {formatDate(draft.updateTime)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* 操作按钮 */}
+                      <div className="flex-shrink-0 flex items-center gap-2">
+                        <button
+                          onClick={() => handleEdit(draft.mediaId)}
+                          className="p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          title="编辑"
+                        >
+                          <Edit className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(draft.mediaId)}
+                          disabled={deletingId === draft.mediaId}
+                          className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
+                          title="删除"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  );
+                })}
+                
+                {/* 显示公众号草稿 */}
                 {drafts.map((draft) => {
                   const isImported = isImportedDraft(draft.mediaId);
+                  const filePath = getDraftFilePath(draft.mediaId);
                   
                   return (
                     <div
@@ -407,6 +656,18 @@ export default function DraftBox({ onEditDraft, onNewArticle }: DraftBoxProps) {
                           <p className="text-sm text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
                             {draft.digest}
                           </p>
+                        )}
+
+                        {/* 文件路径显示 */}
+                        {filePath && (
+                          <div className="mb-3">
+                            <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                              <FolderOpen className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate" title={filePath}>
+                                文件路径: {filePath}
+                              </span>
+                            </div>
+                          </div>
                         )}
                         
                         <div className="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">

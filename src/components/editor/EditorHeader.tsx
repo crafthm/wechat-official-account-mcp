@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Menu, Transition } from '@headlessui/react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Eye, Edit, ChevronDown, Check } from 'lucide-react';
 import { useEditorStore } from '@/stores/editor-store';
 import { config } from '@/lib/markdown/config';
 import { formatDoc } from '@/lib/utils/formatter';
@@ -19,6 +19,14 @@ interface EditorHeaderProps {
   autoRefreshEnabled?: boolean;
   editorContent: string;
   outputHtml: string;
+  isViewMode?: boolean;
+  onToggleViewMode?: () => void;
+  showViewModeToggle?: boolean;
+  saveTargets?: {
+    local: boolean;
+    wechat: boolean;
+  };
+  onSaveTargetsChange?: (targets: { local: boolean; wechat: boolean }) => void;
 }
 
 export function EditorHeader({
@@ -34,6 +42,11 @@ export function EditorHeader({
   autoRefreshEnabled = false,
   editorContent,
   outputHtml,
+  isViewMode = false,
+  onToggleViewMode,
+  showViewModeToggle = false,
+  saveTargets = { local: false, wechat: true },
+  onSaveTargetsChange,
 }: EditorHeaderProps) {
   const {
     currentFont,
@@ -67,6 +80,15 @@ export function EditorHeader({
 
   const handleExport = () => {
     exportHTML(outputHtml);
+  };
+
+  const handleToggleSaveTarget = (target: 'local' | 'wechat') => {
+    if (onSaveTargetsChange) {
+      onSaveTargetsChange({
+        ...saveTargets,
+        [target]: !saveTargets[target],
+      });
+    }
   };
 
   const formatItems = [
@@ -407,6 +429,31 @@ export function EditorHeader({
 
       {/* 右侧按钮组 */}
       <div className="flex items-center space-x-2">
+        {/* 查看/编辑模式切换按钮 */}
+        {showViewModeToggle && onToggleViewMode && (
+          <button
+            onClick={onToggleViewMode}
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded transition-colors ${
+              isViewMode
+                ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
+                : 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400'
+            }`}
+            title={isViewMode ? '切换到编辑模式' : '切换到查看模式'}
+          >
+            {isViewMode ? (
+              <>
+                <Eye className="w-4 h-4" />
+                <span>查看</span>
+              </>
+            ) : (
+              <>
+                <Edit className="w-4 h-4" />
+                <span>编辑</span>
+              </>
+            )}
+          </button>
+        )}
+        
         {/* 复制按钮 */}
         <button
           onClick={onCopy}
@@ -415,13 +462,64 @@ export function EditorHeader({
           复制
         </button>
         
-        {/* 保存按钮 */}
-        <button
-          onClick={onSave}
-          className="px-4 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-        >
-          保存
-        </button>
+        {/* 保存按钮组（保存按钮 + 下拉菜单） */}
+        <div className="flex items-stretch">
+          {/* 保存按钮 */}
+          <button
+            onClick={onSave}
+            className={`px-4 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors h-full ${
+              onSaveTargetsChange ? 'rounded-l rounded-r-0 border-r-0' : 'rounded'
+            }`}
+          >
+            保存
+          </button>
+          
+          {/* 保存目标选择下拉菜单 */}
+          {onSaveTargetsChange && (
+            <Menu as="div" className="relative flex">
+              <Menu.Button className="px-2 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 border-l-0 rounded-r rounded-l-0 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors flex items-center justify-center h-full">
+                <ChevronDown className="w-4 h-4" />
+              </Menu.Button>
+              <Transition
+                enter="transition ease-out duration-100"
+                enterFrom="transform opacity-0 scale-95"
+                enterTo="transform opacity-100 scale-100"
+                leave="transition ease-in duration-75"
+                leaveFrom="transform opacity-100 scale-100"
+                leaveTo="transform opacity-0 scale-95"
+              >
+                <Menu.Items className="absolute right-0 top-full mt-0 w-40 bg-white dark:bg-gray-800 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 z-10">
+                  <Menu.Item>
+                    {({ active }) => (
+                      <button
+                        onClick={() => handleToggleSaveTarget('local')}
+                        className={`${
+                          active ? 'bg-gray-100 dark:bg-gray-700' : ''
+                        } w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between`}
+                      >
+                        <span>本地</span>
+                        {saveTargets.local && <Check className="w-4 h-4 text-green-500" />}
+                      </button>
+                    )}
+                  </Menu.Item>
+                  <Menu.Item>
+                    {({ active }) => (
+                      <button
+                        onClick={() => handleToggleSaveTarget('wechat')}
+                        className={`${
+                          active ? 'bg-gray-100 dark:bg-gray-700' : ''
+                        } w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 flex items-center justify-between`}
+                      >
+                        <span>公众号</span>
+                        {saveTargets.wechat && <Check className="w-4 h-4 text-green-500" />}
+                      </button>
+                    )}
+                  </Menu.Item>
+                </Menu.Items>
+              </Transition>
+            </Menu>
+          )}
+        </div>
         
         {/* 发布按钮 */}
         <button

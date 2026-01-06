@@ -2,7 +2,7 @@ import sqlite3 from 'sqlite3';
 import { promisify } from 'util';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, copyFileSync, unlinkSync } from 'fs';
 import CryptoJS from 'crypto-js';
 import { WechatConfig, AccessTokenInfo, MediaInfo } from '../mcp-tool/types.js';
 import { logger } from '../utils/logger.js';
@@ -35,21 +35,249 @@ export class StorageManager {
         mkdirSync(dataDir, { recursive: true });
       }
 
-      this.db = new sqlite3.Database(this.dbPath, (err) => {
+      // 检查是否是数据库损坏错误
+      const isCorruptError = (err: any): boolean => {
+        if (!err) return false;
+        return (
+          err.message?.includes('corrupt') || 
+          err.message?.includes('malformed') ||
+          err.code === 'SQLITE_CORRUPT' ||
+          err.errno === 11 ||
+          (err.message && /SQLITE_CORRUPT/i.test(err.message))
+        );
+      };
+
+      this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
         if (err) {
           logger.error('Failed to open database:', err);
-          reject(err);
+          // 如果是损坏错误，尝试修复
+          if (isCorruptError(err)) {
+            logger.warn('Database corrupted on open, attempting to repair...');
+            this.repairDatabase()
+              .then(() => {
+                // 重新打开数据库
+                this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (reopenErr) => {
+                  if (reopenErr) {
+                    logger.error('Failed to reopen database after repair:', reopenErr);
+                    reject(new Error(`数据库损坏且修复失败。请尝试删除数据库文件 ${this.dbPath} 后重启服务。错误: ${reopenErr.message}`));
+                    return;
+                  }
+                  // 继续初始化流程
+                  this.configureDatabase()
+                    .then(() => this.checkDatabaseIntegrity())
+                    .then(() => this.createTables())
+                    .then(() => {
+                      logger.info('Database repaired and initialized');
+                      resolve();
+                    })
+                    .catch((initError) => {
+                      logger.error('Failed to initialize after repair:', initError);
+                      reject(initError);
+                    });
+                });
+              })
+              .catch((repairError) => {
+                logger.error('Failed to repair database:', repairError);
+                reject(new Error(`数据库损坏且修复失败。请尝试删除数据库文件 ${this.dbPath} 后重启服务。错误: ${repairError instanceof Error ? repairError.message : String(repairError)}`));
+              });
+          } else {
+            reject(err);
+          }
           return;
         }
 
-        this.createTables()
+        // 配置数据库以提高稳定性和性能
+        this.configureDatabase()
+          .then(() => this.checkDatabaseIntegrity())
+          .then(() => this.createTables())
           .then(() => {
             logger.info('Storage manager initialized');
             resolve();
           })
-          .catch(reject);
+          .catch((error) => {
+            // 如果数据库损坏，尝试修复
+            if (isCorruptError(error)) {
+              logger.warn('Database corrupted during initialization, attempting to repair...');
+              this.repairDatabase()
+                .then(() => {
+                  // 重新打开数据库
+                  if (this.db) {
+                    this.db.close((closeErr) => {
+                      if (closeErr) {
+                        logger.warn('Error closing database:', closeErr);
+                      }
+                    });
+                  }
+                  this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (reopenErr) => {
+                    if (reopenErr) {
+                      logger.error('Failed to reopen database after repair:', reopenErr);
+                      reject(new Error(`数据库损坏且修复失败。请尝试删除数据库文件 ${this.dbPath} 后重启服务。错误: ${reopenErr.message}`));
+                      return;
+                    }
+                    // 继续初始化流程
+                    this.configureDatabase()
+                      .then(() => this.checkDatabaseIntegrity())
+                      .then(() => this.createTables())
+                      .then(() => {
+                        logger.info('Database repaired and initialized');
+                        resolve();
+                      })
+                      .catch((initError) => {
+                        logger.error('Failed to initialize after repair:', initError);
+                        reject(initError);
+                      });
+                  });
+                })
+                .catch((repairError) => {
+                  logger.error('Failed to repair database:', repairError);
+                  reject(new Error(`数据库损坏且修复失败。请尝试删除数据库文件 ${this.dbPath} 后重启服务。错误: ${repairError instanceof Error ? repairError.message : String(repairError)}`));
+                });
+            } else {
+              reject(error);
+            }
+          });
       });
     });
+  }
+
+  /**
+   * 配置数据库（启用 WAL 模式等）
+   */
+  private async configureDatabase(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const run = promisify(this.db.run.bind(this.db));
+    
+    // 启用 WAL 模式（Write-Ahead Logging），提高并发性能和稳定性
+    await run('PRAGMA journal_mode = WAL');
+    
+    // 设置同步模式为 NORMAL（平衡性能和安全性）
+    await run('PRAGMA synchronous = NORMAL');
+    
+    // 设置 busy_timeout（避免数据库锁定）
+    await run('PRAGMA busy_timeout = 5000');
+    
+    // 启用外键约束
+    await run('PRAGMA foreign_keys = ON');
+  }
+
+  /**
+   * 检查数据库完整性
+   */
+  private async checkDatabaseIntegrity(): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    try {
+      const get = promisify(this.db.get.bind(this.db));
+      const result = await get('PRAGMA integrity_check') as { integrity_check: string } | undefined;
+      
+      if (result && result.integrity_check !== 'ok') {
+        // 如果完整性检查失败，检查是否是空数据库（空数据库可能返回 'ok' 或其他值）
+        // 对于严重损坏，会抛出错误
+        if (result.integrity_check.includes('corrupt') || result.integrity_check.includes('malformed')) {
+          throw new Error(`Database integrity check failed: ${result.integrity_check}`);
+        }
+        // 对于其他情况（可能是空数据库），记录警告但继续
+        logger.warn(`Database integrity check result: ${result.integrity_check}`);
+      }
+    } catch (error: any) {
+      // 如果完整性检查本身失败（可能是数据库损坏），抛出错误
+      if (error?.message?.includes('corrupt') || error?.message?.includes('malformed') || 
+          error?.code === 'SQLITE_CORRUPT' || error?.errno === 11) {
+        throw error;
+      }
+      // 其他错误也抛出
+      throw error;
+    }
+  }
+
+  /**
+   * 修复数据库
+   */
+  private async repairDatabase(): Promise<void> {
+    logger.info('Attempting to repair database...');
+    
+    try {
+      // 关闭当前连接（如果存在）
+      if (this.db) {
+        await new Promise<void>((resolve) => {
+          this.db!.close((err) => {
+            if (err) {
+              logger.warn('Error closing database:', err);
+            }
+            this.db = null;
+            resolve();
+          });
+        });
+      }
+
+      // 备份损坏的数据库
+      const backupPath = `${this.dbPath}.backup.${Date.now()}`;
+      if (existsSync(this.dbPath)) {
+        try {
+          copyFileSync(this.dbPath, backupPath);
+          logger.info(`Backed up corrupted database to: ${backupPath}`);
+        } catch (backupError) {
+          logger.warn('Failed to backup corrupted database:', backupError);
+        }
+      }
+
+      // 尝试删除损坏的数据库文件（如果 VACUUM 无法修复）
+      // 但先尝试 VACUUM 修复
+      return new Promise((resolve, reject) => {
+        // 先尝试打开数据库并执行 VACUUM
+        const tempDb = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+          if (err) {
+            logger.warn('Cannot open database for VACUUM, will try to recreate:', err);
+            // 如果无法打开，删除损坏的文件，让系统重新创建
+            try {
+              if (existsSync(this.dbPath)) {
+                unlinkSync(this.dbPath);
+                logger.info('Removed corrupted database file, will be recreated');
+              }
+            } catch (unlinkError) {
+              logger.error('Failed to remove corrupted database file:', unlinkError);
+            }
+            resolve();
+            return;
+          }
+
+          // 尝试执行 VACUUM 来修复数据库
+          const run = promisify(tempDb.run.bind(tempDb));
+          run('VACUUM')
+            .then(() => {
+              logger.info('Database vacuum completed');
+              tempDb.close((closeErr) => {
+                if (closeErr) {
+                  logger.warn('Error closing temp database:', closeErr);
+                }
+                resolve();
+              });
+            })
+            .catch((vacuumError) => {
+              logger.warn('VACUUM failed, will try to recreate database:', vacuumError);
+              tempDb.close((closeErr) => {
+                if (closeErr) {
+                  logger.warn('Error closing temp database:', closeErr);
+                }
+                // 如果 VACUUM 失败，删除损坏的文件
+                try {
+                  if (existsSync(this.dbPath)) {
+                    unlinkSync(this.dbPath);
+                    logger.info('Removed corrupted database file after VACUUM failure, will be recreated');
+                  }
+                } catch (unlinkError) {
+                  logger.error('Failed to remove corrupted database file:', unlinkError);
+                }
+                resolve();
+              });
+            });
+        });
+      });
+    } catch (error) {
+      logger.error('Database repair failed:', error);
+      throw error;
+    }
   }
 
   /**
@@ -173,23 +401,111 @@ export class StorageManager {
    * 保存配置
    */
   async saveConfig(config: WechatConfig): Promise<void> {
-    if (!this.db) throw new Error('Database not initialized');
+    // 如果数据库未初始化，尝试初始化
+    if (!this.db) {
+      logger.warn('Database not initialized, attempting to initialize...');
+      try {
+        await this.initialize();
+      } catch (initError) {
+        logger.error('Failed to initialize database in saveConfig:', initError);
+        throw new Error(`数据库未初始化且初始化失败: ${initError instanceof Error ? initError.message : String(initError)}`);
+      }
+    }
+
+    if (!this.db) {
+      throw new Error('Database not initialized after initialization attempt');
+    }
 
     const run = promisify(this.db.run.bind(this.db));
     const now = Date.now();
 
-    await run(
-      `INSERT OR REPLACE INTO config (id, app_id, app_secret, token, encoding_aes_key, created_at, updated_at) 
-       VALUES (1, ?, ?, ?, ?, ?, ?)`,
-      [
-        config.appId,
-        this.encryptValue(config.appSecret),
-        this.encryptValue(config.token || null),
-        this.encryptValue(config.encodingAESKey || null),
-        now,
-        now,
-      ]
-    );
+    try {
+      await run(
+        `INSERT OR REPLACE INTO config (id, app_id, app_secret, token, encoding_aes_key, created_at, updated_at) 
+         VALUES (1, ?, ?, ?, ?, ?, ?)`,
+        [
+          config.appId,
+          this.encryptValue(config.appSecret),
+          this.encryptValue(config.token || null),
+          this.encryptValue(config.encodingAESKey || null),
+          now,
+          now,
+        ]
+      );
+    } catch (error: any) {
+      // 检查是否是数据库损坏错误
+      const isCorruptError = 
+        error?.message?.includes('corrupt') || 
+        error?.message?.includes('malformed') ||
+        error?.code === 'SQLITE_CORRUPT' ||
+        error?.errno === 11 || // SQLITE_CORRUPT 错误代码
+        (error?.message && /SQLITE_CORRUPT/i.test(error.message));
+      
+      if (isCorruptError) {
+        logger.warn('Database corruption detected during saveConfig, attempting repair...');
+        try {
+          // 修复数据库
+          await this.repairDatabase();
+          
+          // 重新打开数据库
+          await new Promise<void>((resolve, reject) => {
+            if (this.db) {
+              this.db.close((closeErr) => {
+                if (closeErr) {
+                  logger.warn('Error closing database before repair:', closeErr);
+                }
+                this.db = null;
+              });
+            }
+            
+            this.db = new sqlite3.Database(this.dbPath, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+              if (err) {
+                logger.error('Failed to reopen database after repair:', err);
+                reject(new Error(`修复后无法重新打开数据库: ${err.message}`));
+                return;
+              }
+              
+              // 配置数据库
+              this.configureDatabase()
+                .then(() => this.createTables())
+                .then(() => {
+                  logger.info('Database repaired and reconfigured');
+                  resolve();
+                })
+                .catch((configError) => {
+                  logger.error('Failed to configure database after repair:', configError);
+                  reject(configError);
+                });
+            });
+          });
+          
+          // 重试保存
+          if (!this.db) {
+            throw new Error('Database not initialized after repair');
+          }
+          const retryRun = promisify(this.db.run.bind(this.db));
+          await retryRun(
+            `INSERT OR REPLACE INTO config (id, app_id, app_secret, token, encoding_aes_key, created_at, updated_at) 
+             VALUES (1, ?, ?, ?, ?, ?, ?)`,
+            [
+              config.appId,
+              this.encryptValue(config.appSecret),
+              this.encryptValue(config.token || null),
+              this.encryptValue(config.encodingAESKey || null),
+              now,
+              now,
+            ]
+          );
+          logger.info('Config saved successfully after database repair');
+        } catch (repairError: any) {
+          logger.error('Failed to save config after repair attempt:', repairError);
+          const errorMsg = error?.message || String(error);
+          throw new Error(`数据库损坏且修复失败。错误: ${errorMsg}。请尝试重启服务，如果问题持续，可能需要删除数据库文件 ${this.dbPath} 后重新创建。`);
+        }
+      } else {
+        throw error;
+      }
+    }
   }
 
   /**

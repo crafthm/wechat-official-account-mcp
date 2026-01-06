@@ -1,12 +1,24 @@
 import { useState } from "react";
-import { PanelLeftClose, PanelLeftOpen, Home as HomeIcon, MessageSquare, Settings } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Home as HomeIcon, Settings, Archive } from "lucide-react";
 import WechatAccount from "./WechatAccount";
+import DraftBox from "./DraftBox";
+import Editor from "./Editor";
 
-type PageType = "home" | "wechat" | "config";
+type PageType = "home" | "wechat" | "draft" | "editor";
+
+interface DraftData {
+  mediaId: string;
+  title: string;
+  content: string;
+  author?: string;
+  digest?: string;
+}
 
 export default function Home() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [currentPage, setCurrentPage] = useState<PageType>("home");
+  const [draftData, setDraftData] = useState<DraftData | null>(null);
+  const [shouldClearEditor, setShouldClearEditor] = useState(false);
 
   const renderContent = () => {
     switch (currentPage) {
@@ -18,8 +30,32 @@ export default function Home() {
             <WechatAccount />
           </div>
         );
-      case "config":
-        return null; // 配置已移至公众号页面
+      case "draft":
+        return (
+          <div className="h-full">
+            <DraftBox 
+              onEditDraft={(data) => {
+                setDraftData(data);
+                setCurrentPage("editor");
+              }}
+              onNewArticle={() => {
+                setDraftData(null);
+                setShouldClearEditor(true);
+                setCurrentPage("editor");
+              }}
+            />
+          </div>
+        );
+      case "editor":
+        return (
+          <div className="h-full">
+            <Editor 
+              draftData={draftData}
+              shouldClear={shouldClearEditor}
+              onClearComplete={() => setShouldClearEditor(false)}
+            />
+          </div>
+        );
       default:
         return null;
     }
@@ -52,7 +88,20 @@ export default function Home() {
             <HomeIcon className="w-5 h-5" />
           </button>
 
-          {/* 公众号按钮 */}
+          {/* 草稿箱按钮 */}
+          <button
+            onClick={() => setCurrentPage("draft")}
+            className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
+              currentPage === "draft"
+                ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400"
+                : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
+            }`}
+            title="草稿箱"
+          >
+            <Archive className="w-5 h-5" />
+          </button>
+
+          {/* 配置按钮 */}
           <button
             onClick={() => setCurrentPage("wechat")}
             className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
@@ -60,9 +109,9 @@ export default function Home() {
                 ? "bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400"
                 : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
             }`}
-            title="公众号"
+            title="配置"
           >
-            <MessageSquare className="w-5 h-5" />
+            <Settings className="w-5 h-5" />
           </button>
         </div>
       )}
@@ -80,7 +129,7 @@ export default function Home() {
 
       {/* 主内容区域 */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {currentPage === "wechat" ? (
+        {(currentPage === "wechat" || currentPage === "editor") ? (
           <div className="flex-1 overflow-hidden">
             {renderContent()}
           </div>

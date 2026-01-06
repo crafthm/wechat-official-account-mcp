@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Eye, Edit } from 'lucide-react';
 import { useEditorStore } from '@/stores/editor-store';
 import { CodeMirrorEditor } from '@/components/editor/CodeMirrorEditor';
 import { Preview } from '@/components/editor/Preview';
@@ -69,6 +68,15 @@ export default function Editor({ draftData, shouldClear, onClearComplete, isView
     x: number;
     y: number;
   }>({ visible: false, x: 0, y: 0 });
+  
+  // 保存目标状态
+  const [saveTargets, setSaveTargets] = useState<{
+    local: boolean;
+    wechat: boolean;
+  }>({
+    local: false,
+    wechat: true, // 默认只保存到公众号
+  });
 
   const editorRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -764,109 +772,249 @@ export default function Editor({ draftData, shouldClear, onClearComplete, isView
     }
   };
 
+  // 保存到本地
+  const saveToLocal = async (title: string, content: string, author?: string, digest?: string) => {
+    try {
+      // 生成唯一的 mediaId（使用时间戳+随机数）
+      const mediaId = draftData?.mediaId || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = Date.now();
+
+      // 尝试从现有草稿获取创建时间
+      let createTime = now;
+      if (draftData?.mediaId) {
+        const draftKey = `local_draft_${draftData.mediaId}`;
+        const existingDraft = localStorage.getItem(draftKey);
+        if (existingDraft) {
+          try {
+            const parsed = JSON.parse(existingDraft);
+            createTime = parsed.createTime || now;
+          } catch (e) {
+            // 解析失败，使用当前时间
+          }
+        }
+      }
+
+      // 保存草稿详情到 localStorage
+      const draftKey = `local_draft_${mediaId}`;
+      localStorage.setItem(draftKey, JSON.stringify({
+        title,
+        content,
+        author: author || '',
+        digest: digest || '',
+        createTime,
+        updateTime: now,
+      }));
+
+      // 更新导入标记列表
+      const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+      const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+        ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+        : importedDrafts;
+      
+      const existingIndex = normalizedDrafts.findIndex((item: any) => 
+        (typeof item === 'string' ? item : item.mediaId) === mediaId
+      );
+      
+      if (existingIndex >= 0) {
+        if (typeof normalizedDrafts[existingIndex] === 'object') {
+          normalizedDrafts[existingIndex].filePath = fileName || '';
+        } else {
+          normalizedDrafts[existingIndex] = { mediaId, filePath: fileName || '' };
+        }
+      } else {
+        normalizedDrafts.push({ mediaId, filePath: fileName || '' });
+      }
+      localStorage.setItem('imported_drafts', JSON.stringify(normalizedDrafts));
+
+      return mediaId;
+    } catch (error) {
+      console.error('保存到本地失败:', error);
+      throw error;
+    }
+  };
+
   // 处理保存草稿（直接保存，不弹出对话框）
   const handleSave = async () => {
+    // 检查是否至少选择了一个保存目标
+    if (!saveTargets.local && !saveTargets.wechat) {
+      alert('请至少选择一个保存目标（本地或公众号）');
+      return;
+    }
     try {
       // 从HTML内容中提取信息（会移除标题元素）
       const { title, imageSrc, content: contentWithoutTitle } = extractContentInfo(output);
       
       let thumbMediaId = '';
       
-      // 如果有图片，尝试上传第一张图片作为封面图片
-      if (imageSrc) {
-        try {
-          thumbMediaId = await uploadImageAsThumb(imageSrc);
-        } catch (error) {
-          // 如果上传失败，使用默认占位符图片
-          console.warn('上传封面图失败，使用默认占位符:', error);
+      // 如果需要保存到公众号，上传封面图片
+      if (saveTargets.wechat) {
+        if (imageSrc) {
           try {
-            thumbMediaId = await uploadDefaultThumb();
-          } catch (defaultError) {
-            throw new Error('无法上传封面图片，请稍后重试');
-          }
-        }
-      } else {
-        // 如果没有图片，使用默认占位符图片
-        try {
-          thumbMediaId = await uploadDefaultThumb();
-        } catch (error) {
-          throw new Error('无法上传默认封面图片，请稍后重试');
-        }
-      }
-      
-      if (!thumbMediaId) {
-        throw new Error('无法获取封面图片');
-      }
-      
-      // 如果是编辑已有草稿，调用更新接口
-      if (draftData?.mediaId) {
-        const response = await fetch('/api/draft/update', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            mediaId: draftData.mediaId,
-            index: 0, // 默认更新第一篇文章
-            title,
-            content: contentWithoutTitle, // 使用移除标题后的内容
-            thumbMediaId,
-            author: draftData?.author || '',
-            digest: draftData?.digest || '',
-            showCoverPic: 1,
-            needOpenComment: 0,
-            onlyFansCanComment: 0,
-            isOriginal: 0,
-          }),
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-          // 如果是从本地导入的，确保标记已记录（更新时也保持标记）
-          if (isImportedFromLocal) {
+            thumbMediaId = await uploadImageAsThumb(imageSrc);
+          } catch (error) {
+            // 如果上传失败，使用默认占位符图片
+            console.warn('上传封面图失败，使用默认占位符:', error);
             try {
-              const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
-              if (!importedDrafts.includes(draftData.mediaId)) {
-                importedDrafts.push(draftData.mediaId);
-                localStorage.setItem('imported_drafts', JSON.stringify(importedDrafts));
-              }
-            } catch (error) {
-              console.error('保存导入标记失败:', error);
+              thumbMediaId = await uploadDefaultThumb();
+            } catch (defaultError) {
+              throw new Error('无法上传封面图片，请稍后重试');
             }
           }
-          alert(`草稿更新成功！\n草稿ID: ${draftData.mediaId}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
         } else {
-          alert(`更新失败：${result.message || '未知错误'}`);
+          // 如果没有图片，使用默认占位符图片
+          try {
+            thumbMediaId = await uploadDefaultThumb();
+          } catch (error) {
+            throw new Error('无法上传默认封面图片，请稍后重试');
+          }
         }
-      } else {
-        // 新建草稿的逻辑
-        const response = await fetch('/api/draft/save', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            title,
-            content: contentWithoutTitle, // 使用移除标题后的内容
-            thumbMediaId,
-            author: '',
-            digest: '',
-            showCoverPic: 1,
-            needOpenComment: 0,
-            onlyFansCanComment: 0,
-            isOriginal: 0,
-          }),
-        });
         
-        const result = await response.json();
-        
-        if (result.success) {
-          handleSaveSuccess(result.data.mediaId);
-        } else {
-          alert(`保存失败：${result.message || '未知错误'}`);
+        if (!thumbMediaId) {
+          throw new Error('无法获取封面图片');
         }
       }
+      
+      const savePromises: Promise<string>[] = [];
+      const saveResults: string[] = [];
+
+      // 保存到本地
+      if (saveTargets.local) {
+        savePromises.push(
+          saveToLocal(
+            title,
+            contentWithoutTitle,
+            draftData?.author,
+            draftData?.digest
+          ).then(mediaId => {
+            saveResults.push(`本地: ${mediaId}`);
+            return mediaId;
+          }).catch(error => {
+            saveResults.push(`本地保存失败: ${error instanceof Error ? error.message : '未知错误'}`);
+            throw error;
+          })
+        );
+      }
+
+      // 保存到公众号
+      if (saveTargets.wechat) {
+        // 如果是编辑已有草稿，调用更新接口
+        if (draftData?.mediaId) {
+          const updatePromise = fetch('/api/draft/update', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              mediaId: draftData.mediaId,
+              index: 0,
+              title,
+              content: contentWithoutTitle,
+              thumbMediaId,
+              author: draftData?.author || '',
+              digest: draftData?.digest || '',
+              showCoverPic: 1,
+              needOpenComment: 0,
+              onlyFansCanComment: 0,
+              isOriginal: 0,
+            }),
+          }).then(async (response) => {
+            const result = await response.json();
+            if (result.success) {
+              // 如果是从本地导入的，确保标记已记录
+              if (isImportedFromLocal) {
+                try {
+                  const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+                  const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+                    ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+                    : importedDrafts;
+                  
+                  const existingIndex = normalizedDrafts.findIndex((item: any) => 
+                    (typeof item === 'string' ? item : item.mediaId) === draftData.mediaId
+                  );
+                  
+                  if (existingIndex >= 0) {
+                    if (typeof normalizedDrafts[existingIndex] === 'object') {
+                      normalizedDrafts[existingIndex].filePath = fileName || '';
+                    } else {
+                      normalizedDrafts[existingIndex] = { mediaId: draftData.mediaId, filePath: fileName || '' };
+                    }
+                  } else {
+                    normalizedDrafts.push({ mediaId: draftData.mediaId, filePath: fileName || '' });
+                  }
+                  localStorage.setItem('imported_drafts', JSON.stringify(normalizedDrafts));
+                } catch (error) {
+                  console.error('保存导入标记失败:', error);
+                }
+              }
+              saveResults.push(`公众号: ${draftData.mediaId}`);
+              return draftData.mediaId;
+            } else {
+              throw new Error(result.message || '更新失败');
+            }
+          });
+          savePromises.push(updatePromise);
+        } else {
+          // 新建草稿的逻辑
+          const createPromise = fetch('/api/draft/save', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              title,
+              content: contentWithoutTitle,
+              thumbMediaId,
+              author: '',
+              digest: '',
+              showCoverPic: 1,
+              needOpenComment: 0,
+              onlyFansCanComment: 0,
+              isOriginal: 0,
+            }),
+          }).then(async (response) => {
+            const result = await response.json();
+            if (result.success) {
+              const mediaId = result.data.mediaId;
+              // 如果是从本地导入的，记录到 localStorage
+              if (isImportedFromLocal) {
+                try {
+                  const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
+                  const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+                    ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+                    : importedDrafts;
+                  
+                  const existingIndex = normalizedDrafts.findIndex((item: any) => 
+                    (typeof item === 'string' ? item : item.mediaId) === mediaId
+                  );
+                  
+                  if (existingIndex >= 0) {
+                    if (typeof normalizedDrafts[existingIndex] === 'object') {
+                      normalizedDrafts[existingIndex].filePath = fileName || '';
+                    } else {
+                      normalizedDrafts[existingIndex] = { mediaId, filePath: fileName || '' };
+                    }
+                  } else {
+                    normalizedDrafts.push({ mediaId, filePath: fileName || '' });
+                  }
+                  localStorage.setItem('imported_drafts', JSON.stringify(normalizedDrafts));
+                } catch (error) {
+                  console.error('保存导入标记失败:', error);
+                }
+              }
+              saveResults.push(`公众号: ${mediaId}`);
+              return mediaId;
+            } else {
+              throw new Error(result.message || '保存失败');
+            }
+          });
+          savePromises.push(createPromise);
+        }
+      }
+
+      // 等待所有保存操作完成
+      await Promise.all(savePromises);
+      
+      alert(`保存成功！\n${saveResults.join('\n')}\n\n您可以在"草稿箱"中查看和管理此草稿。`);
     } catch (error) {
       console.error('保存草稿失败:', error);
       alert(`保存失败：${error instanceof Error ? error.message : '未知错误'}`);
@@ -879,10 +1027,27 @@ export default function Editor({ draftData, shouldClear, onClearComplete, isView
     if (isImportedFromLocal) {
       try {
         const importedDrafts = JSON.parse(localStorage.getItem('imported_drafts') || '[]');
-        if (!importedDrafts.includes(mediaId)) {
-          importedDrafts.push(mediaId);
-          localStorage.setItem('imported_drafts', JSON.stringify(importedDrafts));
+        // 兼容旧格式：如果是数组，转换为对象数组
+        const normalizedDrafts = Array.isArray(importedDrafts) && importedDrafts.length > 0 && typeof importedDrafts[0] === 'string'
+          ? importedDrafts.map((id: string) => ({ mediaId: id, filePath: '' }))
+          : importedDrafts;
+        
+        const existingIndex = normalizedDrafts.findIndex((item: any) => 
+          (typeof item === 'string' ? item : item.mediaId) === mediaId
+        );
+        
+        if (existingIndex >= 0) {
+          // 更新现有记录的文件路径
+          if (typeof normalizedDrafts[existingIndex] === 'object') {
+            normalizedDrafts[existingIndex].filePath = fileName || '';
+          } else {
+            normalizedDrafts[existingIndex] = { mediaId, filePath: fileName || '' };
+          }
+        } else {
+          // 添加新记录
+          normalizedDrafts.push({ mediaId, filePath: fileName || '' });
         }
+        localStorage.setItem('imported_drafts', JSON.stringify(normalizedDrafts));
       } catch (error) {
         console.error('保存导入标记失败:', error);
       }
@@ -935,32 +1100,6 @@ export default function Editor({ draftData, shouldClear, onClearComplete, isView
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="px-4 py-2 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            {/* 查看/编辑模式切换按钮 */}
-            {draftData && (
-              <button
-                onClick={() => {
-                  setIsViewMode(!isViewMode);
-                }}
-                className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded transition-colors ${
-                  isViewMode
-                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400'
-                    : 'bg-green-100 dark:bg-green-900 text-green-600 dark:text-green-400'
-                }`}
-                title={isViewMode ? '切换到编辑模式' : '切换到查看模式'}
-              >
-                {isViewMode ? (
-                  <>
-                    <Eye className="w-4 h-4" />
-                    <span>查看</span>
-                  </>
-                ) : (
-                  <>
-                    <Edit className="w-4 h-4" />
-                    <span>编辑</span>
-                  </>
-                )}
-              </button>
-            )}
           </div>
           <div className="flex-1">
             <EditorHeader
@@ -976,6 +1115,11 @@ export default function Editor({ draftData, shouldClear, onClearComplete, isView
               autoRefreshEnabled={autoRefreshEnabled && !!fileHandle}
               editorContent={editorContent}
               outputHtml={output}
+              isViewMode={isViewMode}
+              onToggleViewMode={() => setIsViewMode(!isViewMode)}
+              showViewModeToggle={!!draftData}
+              saveTargets={saveTargets}
+              onSaveTargetsChange={setSaveTargets}
             />
           </div>
         </div>

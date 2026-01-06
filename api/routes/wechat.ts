@@ -90,9 +90,18 @@ router.post('/config', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('保存配置失败:', error);
+    // 输出详细的错误信息用于调试
+    if (error instanceof Error) {
+      console.error('错误详情:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+      });
+    }
+    const errorMessage = error instanceof Error ? error.message : '保存配置失败';
     res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : '保存配置失败',
+      message: errorMessage,
     });
   }
 });
