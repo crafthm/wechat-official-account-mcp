@@ -22,7 +22,12 @@ export default defineConfig({
       autoTheme: true,
       autoThemeTarget: '#root'
     }), 
-    tsconfigPaths(),
+    tsconfigPaths({
+      // 忽略 3rd/md 目录下的 tsconfig.json，避免解析错误
+      ignoreConfigErrors: true,
+      // 只解析项目根目录的 tsconfig.json
+      root: './',
+    }),
   ],
   resolve: {
     alias: {
@@ -30,10 +35,13 @@ export default defineConfig({
       'minio': 'data:text/javascript,export default {}',
       'ali-oss': 'data:text/javascript,export default {}',
       'buffer-from': 'data:text/javascript,export default {}',
+      // 排除 3rd/md 中的 Vue 相关导入
+      'vue': 'data:text/javascript,export default {}',
+      'wxt/browser': 'data:text/javascript,export default {}',
     },
   },
   optimizeDeps: {
-    exclude: ['minio', 'ali-oss', 'buffer-from'],
+    exclude: ['minio', 'ali-oss', 'buffer-from', 'vue', 'wxt/browser'],
   },
   build: {
     rollupOptions: {

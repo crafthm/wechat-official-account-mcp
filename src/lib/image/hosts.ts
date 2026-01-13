@@ -193,7 +193,10 @@ export async function uploadToQiniu(
   const dir = config.path ? `${config.path}/` : '';
   const dateFilename = dir + getDateFilename(file.name);
   
-  const observable = qiniu.upload(file, dateFilename, token, {}, { region: config.region });
+  // qiniu.upload 的 region 参数需要特定的字面量类型，进行类型断言
+  const observable = qiniu.upload(file, dateFilename, token, {}, { 
+    region: config.region as 'z0' | 'z1' | 'z2' | 'na0' | 'as0' | 'cn-east-2' 
+  });
   
   return new Promise((resolve, reject) => {
     observable.subscribe({

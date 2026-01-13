@@ -196,10 +196,10 @@ export const useEditorStore = create<EditorStore>()(
         // cssContent: state.cssContent,
       }),
       // 禁用自动恢复 editorContent 和 cssContent
-      merge: (persistedState, currentState) => {
+      merge: (persistedState: Partial<EditorStore> | undefined, currentState: EditorStore) => {
         return {
           ...currentState,
-          ...persistedState,
+          ...(persistedState || {}),
           // 保持当前的 editorContent 和 cssContent，不从持久化状态恢复
           editorContent: currentState.editorContent,
           cssContent: currentState.cssContent,
