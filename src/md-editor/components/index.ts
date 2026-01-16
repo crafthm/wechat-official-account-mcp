@@ -4,4 +4,7 @@ export * from './EditorHeader';
 export * from './EditorContextMenu';
 export * from './SearchTab';
 export * from './FloatingToc';
+export * from './RightSlider';
+export * from './ThemeCustomizer';
+export * from './CssEditor';
 export * from './dialogs';

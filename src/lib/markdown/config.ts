@@ -144,6 +144,35 @@ export const config = {
       desc: '',
     },
   ] as LegendOption[],
+  themeOptions: [
+    {
+      label: '经典',
+      value: 'default',
+      desc: '',
+    },
+    {
+      label: '优雅',
+      value: 'grace',
+      desc: '@brzhang',
+    },
+    {
+      label: '简洁',
+      value: 'simple',
+      desc: '@okooo5km',
+    },
+  ] as { label: string; value: string; desc: string }[],
+  widthOptions: [
+    {
+      label: '移动端',
+      value: 'w-[375px]',
+      desc: '固定',
+    },
+    {
+      label: '电脑端',
+      value: 'w-full',
+      desc: '适应',
+    },
+  ] as { label: string; value: string; desc: string }[],
   form: {
     rows: 1,
     cols: 1,

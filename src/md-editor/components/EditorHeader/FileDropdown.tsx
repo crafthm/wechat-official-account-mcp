@@ -9,6 +9,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { useMdEditorStore } from '../../stores/editor-store';
+import { useMdExportStore } from '../../stores/export-store';
 import {
   MenubarMenu,
   MenubarTrigger,
@@ -40,7 +41,8 @@ export function FileDropdown({
   onToggleFolderPanel,
   onTogglePostSlider,
 }: FileDropdownProps) {
-  const { getContent } = useMdEditorStore();
+  const { getContent, importContent } = useMdEditorStore();
+  const exportStore = useMdExportStore();
 
   // 导入 Markdown
   const handleImportMarkdown = () => {
@@ -53,8 +55,9 @@ export function FileDropdown({
         const reader = new FileReader();
         reader.onload = (event) => {
           const content = event.target?.result as string;
-          // TODO: 实现导入功能
-          console.log('导入 Markdown:', content);
+          if (content) {
+            importContent(content);
+          }
         };
         reader.readAsText(file);
       }
@@ -65,33 +68,24 @@ export function FileDropdown({
   // 导出功能
   const handleExportMD = () => {
     const content = getContent();
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'document.md';
-    a.click();
-    URL.revokeObjectURL(url);
+    exportStore.exportEditorContent2MD(content);
   };
 
-  const handleExportHTML = () => {
-    // TODO: 实现 HTML 导出
-    console.log('导出 HTML');
+  const handleExportHTML = async () => {
+    await exportStore.exportEditorContent2HTML();
   };
 
-  const handleExportPureHTML = () => {
-    // TODO: 实现纯 HTML 导出
-    console.log('导出纯 HTML');
+  const handleExportPureHTML = async () => {
+    const content = getContent();
+    await exportStore.exportEditorContent2PureHTML(content);
   };
 
-  const handleExportPDF = () => {
-    // TODO: 实现 PDF 导出
-    console.log('导出 PDF');
+  const handleExportPDF = async () => {
+    await exportStore.exportEditorContent2PDF();
   };
 
-  const handleDownloadAsImage = () => {
-    // TODO: 实现图片导出
-    console.log('导出为图片');
+  const handleDownloadAsImage = async () => {
+    await exportStore.downloadAsCardImage();
   };
 
   return (
